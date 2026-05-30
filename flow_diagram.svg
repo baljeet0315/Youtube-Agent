@@ -1,0 +1,110 @@
+<svg viewBox="0 0 800 700" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, -apple-system, sans-serif">
+  <rect width="800" height="700" fill="#0f1117"/>
+
+  <!-- Title -->
+  <text x="400" y="38" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="700">YouTube Shorts Agent — Flow</text>
+  <text x="400" y="58" text-anchor="middle" fill="#666" font-size="11">Topic → Script → Voice → Video → YouTube</text>
+
+  <!-- Arrow marker -->
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#555"/>
+    </marker>
+    <marker id="arr2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#2d7a2d"/>
+    </marker>
+  </defs>
+
+  <!-- STEP 1: You -->
+  <rect x="300" y="75" width="200" height="60" rx="10" fill="#1a1f2e" stroke="#7c8cf8" stroke-width="2"/>
+  <text x="400" y="100" text-anchor="middle" fill="#7c8cf8" font-size="13" font-weight="700">You</text>
+  <text x="400" y="120" text-anchor="middle" fill="#aaa" font-size="11">Enter topic idea</text>
+
+  <!-- Arrow -->
+  <line x1="400" y1="135" x2="400" y2="158" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- STEP 2: Script Generator -->
+  <rect x="270" y="160" width="260" height="70" rx="10" fill="#1e1a2e" stroke="#b07cf8" stroke-width="2"/>
+  <text x="400" y="185" text-anchor="middle" fill="#b07cf8" font-size="13" font-weight="700">① Script Generator</text>
+  <text x="400" y="204" text-anchor="middle" fill="#aaa" font-size="11">Claude AI · Attenborough style</text>
+  <text x="400" y="220" text-anchor="middle" fill="#777" font-size="10">title · narration · scenes · tags</text>
+
+  <!-- Arrow -->
+  <line x1="400" y1="230" x2="400" y2="253" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- STEP 3: Voiceover -->
+  <rect x="270" y="255" width="260" height="70" rx="10" fill="#1e1a2e" stroke="#b07cf8" stroke-width="2"/>
+  <text x="400" y="280" text-anchor="middle" fill="#b07cf8" font-size="13" font-weight="700">② Voiceover</text>
+  <text x="400" y="299" text-anchor="middle" fill="#aaa" font-size="11">ElevenLabs TTS API</text>
+  <text x="400" y="315" text-anchor="middle" fill="#777" font-size="10">narration → MP3 audio file</text>
+
+  <!-- Arrow -->
+  <line x1="400" y1="325" x2="400" y2="348" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- STEP 4: Stock Footage -->
+  <rect x="270" y="350" width="260" height="70" rx="10" fill="#1e1a2e" stroke="#b07cf8" stroke-width="2"/>
+  <text x="400" y="375" text-anchor="middle" fill="#b07cf8" font-size="13" font-weight="700">③ Stock Footage</text>
+  <text x="400" y="394" text-anchor="middle" fill="#aaa" font-size="11">Pexels API</text>
+  <text x="400" y="410" text-anchor="middle" fill="#777" font-size="10">scene queries → video clips</text>
+
+  <!-- Arrow -->
+  <line x1="400" y1="420" x2="400" y2="443" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- STEP 5: Video Assembly -->
+  <rect x="270" y="445" width="260" height="70" rx="10" fill="#1e1a2e" stroke="#b07cf8" stroke-width="2"/>
+  <text x="400" y="470" text-anchor="middle" fill="#b07cf8" font-size="13" font-weight="700">④ Video Assembly</text>
+  <text x="400" y="489" text-anchor="middle" fill="#aaa" font-size="11">MoviePy + FFmpeg</text>
+  <text x="400" y="505" text-anchor="middle" fill="#777" font-size="10">clips + captions + audio → MP4</text>
+
+  <!-- Arrow -->
+  <line x1="400" y1="515" x2="400" y2="538" stroke="#555" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- STEP 6: YouTube Upload -->
+  <rect x="270" y="540" width="260" height="70" rx="10" fill="#1a2020" stroke="#4cb8a0" stroke-width="2"/>
+  <text x="400" y="565" text-anchor="middle" fill="#4cb8a0" font-size="13" font-weight="700">⑤ YouTube Upload</text>
+  <text x="400" y="584" text-anchor="middle" fill="#aaa" font-size="11">YouTube Data API v3</text>
+  <text x="400" y="600" text-anchor="middle" fill="#777" font-size="10">private → review → publish</text>
+
+  <!-- Side annotations -->
+  <!-- Left side -->
+  <rect x="30" y="160" width="200" height="52" rx="6" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="130" y="181" text-anchor="middle" fill="#666" font-size="10" font-weight="600">OUTPUT</text>
+  <text x="130" y="198" text-anchor="middle" fill="#555" font-size="10">script.json saved to</text>
+  <text x="130" y="213" text-anchor="middle" fill="#555" font-size="10">output/ folder</text>
+  <line x1="230" y1="186" x2="270" y2="193" stroke="#333" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <rect x="30" y="255" width="200" height="52" rx="6" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="130" y="276" text-anchor="middle" fill="#666" font-size="10" font-weight="600">OUTPUT</text>
+  <text x="130" y="293" text-anchor="middle" fill="#555" font-size="10">voice.mp3 saved to</text>
+  <text x="130" y="308" text-anchor="middle" fill="#555" font-size="10">output/audio/</text>
+  <line x1="230" y1="281" x2="270" y2="288" stroke="#333" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <rect x="30" y="445" width="200" height="52" rx="6" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="130" y="466" text-anchor="middle" fill="#666" font-size="10" font-weight="600">OUTPUT</text>
+  <text x="130" y="483" text-anchor="middle" fill="#555" font-size="10">final.mp4 saved to</text>
+  <text x="130" y="498" text-anchor="middle" fill="#555" font-size="10">output/videos/</text>
+  <line x1="230" y1="471" x2="270" y2="478" stroke="#333" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- Right side tools -->
+  <rect x="570" y="160" width="190" height="52" rx="6" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="665" y="181" text-anchor="middle" fill="#666" font-size="10" font-weight="600">UPGRADE OPTIONS</text>
+  <text x="665" y="198" text-anchor="middle" fill="#555" font-size="10">Runway Gen-3 for</text>
+  <text x="665" y="213" text-anchor="middle" fill="#555" font-size="10">AI video generation</text>
+  <line x1="530" y1="193" x2="570" y2="193" stroke="#333" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <rect x="570" y="255" width="190" height="52" rx="6" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="665" y="276" text-anchor="middle" fill="#666" font-size="10" font-weight="600">UPGRADE OPTIONS</text>
+  <text x="665" y="293" text-anchor="middle" fill="#555" font-size="10">Daniel voice (British)</text>
+  <text x="665" y="308" text-anchor="middle" fill="#555" font-size="10">or PlayHT / Cartesia</text>
+  <line x1="530" y1="288" x2="570" y2="288" stroke="#333" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <rect x="570" y="540" width="190" height="70" rx="6" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="665" y="561" text-anchor="middle" fill="#666" font-size="10" font-weight="600">FUTURE</text>
+  <text x="665" y="578" text-anchor="middle" fill="#555" font-size="10">+ Instagram Reels</text>
+  <text x="665" y="595" text-anchor="middle" fill="#555" font-size="10">+ Web UI</text>
+  <text x="665" y="611" text-anchor="middle" fill="#555" font-size="10">+ Cloud deploy</text>
+  <line x1="530" y1="575" x2="570" y2="575" stroke="#333" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- Footer -->
+  <text x="400" y="680" text-anchor="middle" fill="#333" font-size="10">YouTube Shorts Agent · github.com/baljeetsbal/Youtube-Agent</text>
+</svg>
