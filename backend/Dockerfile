@@ -8,13 +8,11 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy backend requirements (path is relative to repo root)
-COPY backend/requirements.txt .
+# Build context is backend/ — so requirements.txt here IS backend/requirements.txt
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend application code
-COPY backend/ .
+# Copy all backend code
+COPY . .
 
-EXPOSE 8000
-
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
