@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Install all dependencies directly (bypasses any requirements.txt cache issues)
+# Install all backend dependencies directly
 RUN pip install --no-cache-dir \
     "fastapi>=0.111.0" \
     "uvicorn[standard]>=0.29.0" \
@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir \
     "pydantic-settings>=2.2.0" \
     "cryptography>=42.0.0"
 
-COPY . .
+# Copy ONLY backend/ into /app — keeps root main.py (CLI tool) out
+COPY backend/ /app/
 
 CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
