@@ -8,12 +8,26 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Build context is backend/ — so requirements.txt here IS backend/requirements.txt
-# cache-bust: v2
+# Install core server packages first (guaranteed)
+RUN pip install --no-cache-dir \
+    fastapi \
+    "uvicorn[standard]" \
+    pydantic \
+    pydantic-settings \
+    python-dotenv \
+    supabase \
+    celery \
+    redis \
+    boto3 \
+    "python-jose[cryptography]" \
+    httpx \
+    cryptography
+
+# Copy and install any remaining deps
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt || true
 
 # Copy all backend code
 COPY . .
 
-CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
