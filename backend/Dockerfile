@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Build context is backend/ — so requirements.txt here IS backend/requirements.txt
+# cache-bust: v2
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
