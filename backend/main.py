@@ -61,6 +61,17 @@ def debug_env():
         result["dns_resolution"] = socket.getaddrinfo(host, 443)[0][4][0]
     except Exception as e:
         result["dns_error"] = repr(e)
+
+    try:
+        result["google_dns_resolution"] = socket.getaddrinfo("google.com", 443)[0][4][0]
+    except Exception as e:
+        result["google_dns_error"] = repr(e)
+
+    try:
+        result["supabase_co_resolution"] = socket.getaddrinfo("supabase.co", 443)[0][4][0]
+    except Exception as e:
+        result["supabase_co_dns_error"] = repr(e)
+
     return result
 
 
