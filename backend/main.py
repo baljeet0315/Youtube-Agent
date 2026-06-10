@@ -42,6 +42,28 @@ def health():
     return {"status": "ok", "version": "1.0.0"}
 
 
+@app.get("/debug-env")
+def debug_env():
+    import socket
+    url = settings.supabase_url
+    result = {
+        "supabase_url_repr": repr(url),
+        "supabase_url_len": len(url),
+        "anon_key_set": bool(settings.supabase_anon_key),
+        "anon_key_len": len(settings.supabase_anon_key),
+        "service_key_set": bool(settings.supabase_service_role_key),
+        "service_key_len": len(settings.supabase_service_role_key),
+    }
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname
+        result["parsed_host"] = host
+        result["dns_resolution"] = socket.getaddrinfo(host, 443)[0][4][0]
+    except Exception as e:
+        result["dns_error"] = repr(e)
+    return result
+
+
 # ── Users ─────────────────────────────────────────────────────
 
 @app.get("/users/me")
