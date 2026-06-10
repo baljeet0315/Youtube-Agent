@@ -13,3 +13,11 @@ __pycache__/
 .venv/
 venv/
 env/
+
+# Node
+node_modules/
+.next/
+frontend/.next/
+frontend/node_modules/
+frontend/.env.local
+.DS_Store
