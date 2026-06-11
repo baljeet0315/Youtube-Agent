@@ -6,7 +6,8 @@ import anthropic
 import agent_config as config
 
 
-def generate_script(topic: str, style: str = "educational", duration_seconds: int = 45) -> dict:
+def generate_script(topic: str, style: str = "educational", duration_seconds: int = 45,
+                     narration_style: str = "") -> dict:
     """
     Generate a structured script for a YouTube Short.
 
@@ -14,6 +15,9 @@ def generate_script(topic: str, style: str = "educational", duration_seconds: in
         topic: The video topic or idea (e.g. "why cats purr")
         style: One of 'educational', 'motivational', 'story', 'news'
         duration_seconds: Target video length (30–60 seconds recommended)
+        narration_style: Optional free-text override for narration tone/voice
+            (e.g. "David Attenborough", "energetic host"). If empty, falls
+            back to the default Attenborough/Nolan-inspired tone.
 
     Returns:
         dict with keys: title, description, tags, narration, scenes, hook
@@ -22,33 +26,45 @@ def generate_script(topic: str, style: str = "educational", duration_seconds: in
 
     word_target = int(duration_seconds * 2.5)  # ~150 words/min speaking pace
 
-    system_prompt = """You are a writer in the tradition of David Attenborough — calm, wise, observational.
+    if narration_style:
+        system_prompt = f"""You are a writer who creates short-form video narration in this style: {narration_style}.
+Stay fully in that voice and tone throughout.
+Always output valid JSON — no extra text outside the JSON block."""
+
+        tone_rules = f"""Tone and style rules — follow these strictly:
+- Narrate in the following style/voice: {narration_style}
+- Write for the spoken word — short sentences, natural rhythm, easy to read aloud
+- No corporate language, no YouTube filler, no "in conclusion", no "today we explore" """
+    else:
+        system_prompt = """You are a writer in the tradition of David Attenborough — calm, wise, observational.
 You watch humanity from a great distance, with neither judgment nor comfort.
 You tell stories the way Christopher Nolan makes films: layered, atmospheric, non-linear if it serves the idea.
 You never explain. You never resolve. You provoke.
 You speak in images, not arguments. In questions, not answers.
 Always output valid JSON — no extra text outside the JSON block."""
 
-    user_prompt = f"""Write a YouTube Shorts narration about this idea: "{topic}"
-
-Target duration: {duration_seconds} seconds (~{word_target} spoken words)
-
-Tone and style rules — follow these strictly:
+        tone_rules = """Tone and style rules — follow these strictly:
 - Narrate like David Attenborough observing a strange species called humans
 - Build like a Nolan film: open on something specific and concrete, spiral inward, end on an open question with no answer
 - Do NOT explain the idea. Do NOT offer solutions or comfort. Do NOT moralize.
 - Every sentence should make the viewer feel something they cannot name
 - The final line must be a question — haunting, open, unresolvable
 - Write for silence. Short sentences. Pauses. Weight.
-- No corporate language, no YouTube filler, no "in conclusion", no "today we explore"
+- No corporate language, no YouTube filler, no "in conclusion", no "today we explore" """
+
+    user_prompt = f"""Write a YouTube Shorts narration about this idea: "{topic}"
+
+Target duration: {duration_seconds} seconds (~{word_target} spoken words)
+
+{tone_rules}
 
 Return a JSON object with exactly these fields:
 {{
-  "title": "Intriguing YouTube title — mysterious, not clickbait (max 60 chars)",
-  "description": "2–3 sentences in the same Attenborough tone + relevant hashtags",
+  "title": "Intriguing YouTube title — attention-grabbing, matches the narration tone (max 60 chars)",
+  "description": "2–3 sentences in the same tone as the narration + relevant hashtags",
   "tags": ["tag1", "tag2", ...],
-  "hook": "The opening line — a single concrete image or fact that pulls you in immediately",
-  "narration": "Full narration. No scene directions. Just the spoken words. Target {word_target} words. Must end with an unanswered question.",
+  "hook": "The opening line — must grab attention immediately",
+  "narration": "Full narration. No scene directions. Just the spoken words. Target {word_target} words.{' Must end with an unanswered question.' if not narration_style else ''}",
   "scenes": [
     {{
       "timestamp": 0,
