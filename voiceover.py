@@ -3,7 +3,7 @@ voiceover.py — Generate voiceover audio using ElevenLabs TTS
 """
 import os
 import requests
-import config
+import agent_config as config
 
 
 def generate_voiceover(text: str, output_filename: str = "voiceover.mp3") -> str:

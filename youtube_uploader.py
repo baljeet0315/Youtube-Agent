@@ -11,7 +11,7 @@ from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
-import config
+import agent_config as config
 
 # OAuth2 scopes needed
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]

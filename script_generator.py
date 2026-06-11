@@ -3,7 +3,7 @@ script_generator.py — Generate YouTube Shorts scripts using Claude
 """
 import json
 import anthropic
-import config
+import agent_config as config
 
 
 def generate_script(topic: str, style: str = "educational", duration_seconds: int = 45) -> dict:

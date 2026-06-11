@@ -12,6 +12,7 @@ from storage import upload_file
 settings = get_settings()
 
 # Add agent directory to path
+sys.path.insert(0, "/agent")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 celery_app = Celery(
@@ -53,7 +54,7 @@ def generate_video_task(self, job_id: str, user_id: str, params: dict):
         from script_generator import generate_script
         from voiceover import generate_voiceover
         from video_creator import create_video as assemble_video
-        import config as agent_config
+        import agent_config
 
         topic = params["topic"]
         style = params.get("style", "educational")
@@ -167,7 +168,8 @@ def upload_to_platforms_task(self, job_id: str, user_id: str, video_id: str,
         if "youtube" in platforms and user_youtube_token:
             log_action(user_id, "youtube_upload_started", job_id=job_id)
             # YouTube upload using existing uploader
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+            sys.path.insert(0, "/agent")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
             from youtube_uploader import upload_video_with_token
             yt_url = upload_video_with_token(local_path, script, user_youtube_token,
                                              privacy=job.get("privacy", "private"))

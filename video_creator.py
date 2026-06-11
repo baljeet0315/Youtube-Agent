@@ -19,7 +19,7 @@ from moviepy.editor import (
     TextClip,
 )
 from moviepy.config import change_settings
-import config
+import agent_config as config
 
 
 # ── Pexels ──────────────────────────────────────────────────────────────────
