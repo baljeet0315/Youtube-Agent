@@ -9,12 +9,16 @@ settings = get_settings()
 
 
 def get_r2_client():
+    print(f"[R2 DEBUG] endpoint={settings.r2_endpoint!r}")
+    print(f"[R2 DEBUG] bucket={settings.r2_bucket_name!r}")
+    print(f"[R2 DEBUG] access_key_id={settings.r2_access_key_id[:8]!r}...")
+    print(f"[R2 DEBUG] secret_set={bool(settings.r2_secret_access_key)}")
     return boto3.client(
         "s3",
         endpoint_url=settings.r2_endpoint,
         aws_access_key_id=settings.r2_access_key_id,
         aws_secret_access_key=settings.r2_secret_access_key,
-        config=Config(signature_version="s3v4"),
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
         region_name="auto",
     )
 
