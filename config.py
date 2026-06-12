@@ -14,8 +14,8 @@ PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
 YOUTUBE_CLIENT_SECRETS_FILE = os.getenv("YOUTUBE_CLIENT_SECRETS_FILE", "client_secrets.json")
 
 # ── Video Settings ────────────────────────────────────────
-VIDEO_WIDTH = int(os.getenv("VIDEO_WIDTH", 1080))
-VIDEO_HEIGHT = int(os.getenv("VIDEO_HEIGHT", 1920))
+VIDEO_WIDTH = int(os.getenv("VIDEO_WIDTH", 720))
+VIDEO_HEIGHT = int(os.getenv("VIDEO_HEIGHT", 1280))
 VIDEO_FPS = int(os.getenv("VIDEO_FPS", 30))
 MAX_VIDEO_DURATION = int(os.getenv("MAX_VIDEO_DURATION", 60))
 
