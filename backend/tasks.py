@@ -178,7 +178,10 @@ def upload_to_platforms_task(self, job_id: str, user_id: str, video_id: str,
             log_action(user_id, "youtube_uploaded", job_id=job_id,
                        message=yt_url, metadata={"url": yt_url})
 
-        update_video(video_id, update_data)
+        # Only update video record if there's something to update
+        if update_data:
+            update_video(video_id, update_data)
+
         update_job(job_id, {
             "status": "done",
             "current_step": "Uploaded successfully",
