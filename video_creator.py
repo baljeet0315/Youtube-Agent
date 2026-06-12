@@ -190,7 +190,11 @@ def build_scene_clip(scene: dict, scene_duration: float) -> VideoFileClip:
         ).set_fps(config.VIDEO_FPS)
 
     # ── Add caption overlay ──────────────────────────────────────────────────
-    if caption:
+    # TEMPORARILY DISABLED: ImageMagick/font issues on Railway. Re-enable once
+    # caption rendering is fixed (see make_caption_clip).
+    CAPTIONS_ENABLED = False
+
+    if CAPTIONS_ENABLED and caption:
         caption_clip = make_caption_clip(caption, scene_duration, target_w, target_h)
         if caption_clip:
             return CompositeVideoClip([base, caption_clip])
