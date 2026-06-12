@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     r2_secret_access_key: str
     r2_endpoint: str
     r2_bucket_name: str
+    r2_public_url: str = ""
 
     # AI APIs (passed through to agent)
     anthropic_api_key: str

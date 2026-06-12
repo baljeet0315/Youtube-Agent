@@ -41,8 +41,13 @@ def upload_file(local_path: str, key: str, content_type: str = "video/mp4") -> s
             ContentType=content_type,
         )
 
-    # Return the public URL
-    url = f"{settings.r2_endpoint}/{settings.r2_bucket_name}/{key}"
+    # Return the public URL (uses R2's public dev/custom domain if configured,
+    # falling back to the S3 API endpoint otherwise — note the API endpoint
+    # requires auth and won't work directly in a browser)
+    if settings.r2_public_url:
+        url = f"{settings.r2_public_url.rstrip('/')}/{key}"
+    else:
+        url = f"{settings.r2_endpoint}/{settings.r2_bucket_name}/{key}"
     return url
 
 
