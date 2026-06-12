@@ -117,7 +117,7 @@ def make_caption_clip(text: str, duration: float, video_w: int, video_h: int) ->
                 text,
                 fontsize=72,
                 color="white",
-                font="DejaVu-Sans-Bold",
+                font="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
                 stroke_color="black",
                 stroke_width=3,
                 method="caption",
