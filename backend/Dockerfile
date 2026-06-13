@@ -6,9 +6,6 @@ RUN apt-get update && apt-get install -y \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Allow ImageMagick's "convert" to read the text files MoviePy generates
-# for caption rendering (default policy blocks "@" file reads)
-RUN sed -i 's/rights="none" pattern="@\*"/rights="read|write" pattern="@*"/' /etc/ImageMagick-6/policy.xml
 
 WORKDIR /app
 
