@@ -166,6 +166,103 @@ def upload_video(
     return url
 
 
+def upload_video_with_token(video_path: str, script: dict, token_json: str,
+                             privacy: str = "private") -> str:
+    """
+    Upload a video to YouTube using a stored OAuth token (from the web app).
+
+    Args:
+        video_path: Path to the video file
+        script: Script dict (used for title, description, tags)
+        token_json: JSON string of the stored token credentials
+        privacy: 'private', 'unlisted', or 'public'
+
+    Returns:
+        YouTube video URL
+    """
+    from google.oauth2.credentials import Credentials
+
+    token_data = json.loads(token_json)
+    credentials = Credentials(
+        token=token_data.get("token"),
+        refresh_token=token_data.get("refresh_token"),
+        token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+        client_id=token_data.get("client_id"),
+        client_secret=token_data.get("client_secret"),
+        scopes=token_data.get("scopes", SCOPES),
+    )
+
+    # Refresh if expired
+    if not credentials.valid and credentials.refresh_token:
+        credentials.refresh(Request())
+
+    youtube = build("youtube", "v3", credentials=credentials)
+
+    title = script.get("title", "Untitled Video")[:100]
+    description = script.get("description", "")[:5000]
+    tags = script.get("tags", [])
+
+    if "#Shorts" not in tags:
+        tags.append("#Shorts")
+    if "#Shorts" not in description:
+        description += "\n\n#Shorts"
+
+    body = {
+        "snippet": {
+            "title": title,
+            "description": description,
+            "tags": tags,
+            "categoryId": "22",
+            "defaultLanguage": "en",
+        },
+        "status": {
+            "privacyStatus": privacy,
+            "selfDeclaredMadeForKids": False,
+        },
+    }
+
+    media = MediaFileUpload(
+        video_path,
+        chunksize=1024 * 1024 * 4,
+        resumable=True,
+        mimetype="video/mp4",
+    )
+
+    request = youtube.videos().insert(
+        part=",".join(body.keys()),
+        body=body,
+        media_body=media,
+    )
+
+    response = None
+    error = None
+    retry = 0
+
+    while response is None:
+        try:
+            status, response = request.next_chunk()
+        except HttpError as e:
+            if e.resp.status in RETRIABLE_STATUS_CODES:
+                error = f"HTTP {e.resp.status}: {e.content}"
+            else:
+                raise
+        except RETRIABLE_EXCEPTIONS as e:
+            error = f"Network error: {e}"
+
+        if error:
+            retry += 1
+            if retry > MAX_RETRIES:
+                raise RuntimeError(f"Upload failed after {MAX_RETRIES} retries: {error}")
+            wait = min(2 ** retry, 64)
+            time.sleep(wait)
+            error = None
+
+    video_id = response.get("id", "")
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    print(f"✅ YouTube upload complete: {url}")
+    return url
+
+
 if __name__ == "__main__":
     import sys
     import json

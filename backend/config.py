@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # Encryption key for storing OAuth tokens
     encryption_key: str = ""
 
+    # Google OAuth for YouTube
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "https://youtube-agent-production-9eee.up.railway.app/auth/youtube/callback"
+
     class Config:
         env_file = "../.env"
         extra = "ignore"
