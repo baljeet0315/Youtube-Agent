@@ -217,9 +217,9 @@ async def cancel_job(job_id: str, user: dict = Depends(get_current_user)):
 
 # ── YouTube OAuth ─────────────────────────────────────────────
 
-@app.get("/auth/youtube")
-async def youtube_auth(user: dict = Depends(get_current_user)):
-    """Redirect user to Google OAuth consent page."""
+@app.get("/auth/youtube/url")
+async def youtube_auth_url(user: dict = Depends(get_current_user)):
+    """Return the Google OAuth URL for the frontend to redirect to."""
     from google_auth_oauthlib.flow import Flow
     flow = Flow.from_client_config(
         {
@@ -237,10 +237,10 @@ async def youtube_auth(user: dict = Depends(get_current_user)):
     auth_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
-        state=user["id"],  # pass user_id as state so callback knows who to update
+        state=user["id"],
         prompt="consent",
     )
-    return RedirectResponse(auth_url)
+    return {"url": auth_url}
 
 
 @app.get("/auth/youtube/callback")
