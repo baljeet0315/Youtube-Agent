@@ -276,6 +276,7 @@ async def youtube_callback(request: Request):
     """Handle Google OAuth callback, store token in user record."""
     from google_auth_oauthlib.flow import Flow
     from database import update_user
+    import requests as http_requests
 
     code = request.query_params.get("code")
     state = request.query_params.get("state")  # this is the user_id we passed
@@ -283,31 +284,30 @@ async def youtube_callback(request: Request):
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing code or state")
 
-    flow = Flow.from_client_config(
-        {
-            "web": {
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [settings.google_redirect_uri],
-            }
-        },
-        scopes=["https://www.googleapis.com/auth/youtube.upload"],
-        redirect_uri=settings.google_redirect_uri,
-        state=state,
+    # Exchange code for token directly — avoids PKCE mismatch from recreating Flow
+    token_response = http_requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "code": code,
+            "client_id": settings.google_client_id,
+            "client_secret": settings.google_client_secret,
+            "redirect_uri": settings.google_redirect_uri,
+            "grant_type": "authorization_code",
+        }
     )
-    flow.fetch_token(code=code)
-    credentials = flow.credentials
+    token_result = token_response.json()
+
+    if "error" in token_result:
+        raise HTTPException(status_code=400, detail=f"Token exchange failed: {token_result}")
 
     # Store token as JSON in user record
     token_data = json.dumps({
-        "token": credentials.token,
-        "refresh_token": credentials.refresh_token,
-        "token_uri": credentials.token_uri,
-        "client_id": credentials.client_id,
-        "client_secret": credentials.client_secret,
-        "scopes": list(credentials.scopes) if credentials.scopes else [],
+        "token": token_result.get("access_token"),
+        "refresh_token": token_result.get("refresh_token"),
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "client_id": settings.google_client_id,
+        "client_secret": settings.google_client_secret,
+        "scopes": token_result.get("scope", "").split(),
     })
 
     update_user(state, {"youtube_token": token_data})
