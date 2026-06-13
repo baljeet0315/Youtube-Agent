@@ -220,61 +220,46 @@ async def cancel_job(job_id: str, user: dict = Depends(get_current_user)):
 @app.get("/auth/youtube/connect")
 async def youtube_connect_direct(user_id: str):
     """
-    Temporary direct connect endpoint — no Clerk auth needed.
+    Direct connect endpoint — no Clerk auth needed.
     Visit /auth/youtube/connect?user_id=YOUR_USER_ID in browser.
+    Builds auth URL manually (no google_auth_oauthlib) to avoid PKCE being added.
     """
-    from google_auth_oauthlib.flow import Flow
-    flow = Flow.from_client_config(
-        {
-            "web": {
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [settings.google_redirect_uri],
-            }
-        },
-        scopes=["https://www.googleapis.com/auth/youtube.upload"],
-        redirect_uri=settings.google_redirect_uri,
-    )
-    auth_url, _ = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        state=user_id,
-        prompt="consent",
-    )
+    import urllib.parse
+    params = {
+        "client_id": settings.google_client_id,
+        "redirect_uri": settings.google_redirect_uri,
+        "response_type": "code",
+        "scope": "https://www.googleapis.com/auth/youtube.upload",
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": user_id,
+    }
+    auth_url = "https://accounts.google.com/o/oauth2/auth?" + urllib.parse.urlencode(params)
     return RedirectResponse(auth_url)
+
 
 @app.get("/auth/youtube/url")
 async def youtube_auth_url(user: dict = Depends(get_current_user)):
-    """Return the Google OAuth URL for the frontend to redirect to."""
-    from google_auth_oauthlib.flow import Flow
-    flow = Flow.from_client_config(
-        {
-            "web": {
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [settings.google_redirect_uri],
-            }
-        },
-        scopes=["https://www.googleapis.com/auth/youtube.upload"],
-        redirect_uri=settings.google_redirect_uri,
-    )
-    auth_url, state = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        state=user["id"],
-        prompt="consent",
-    )
+    """Return the Google OAuth URL for the frontend to redirect to.
+    Builds auth URL manually (no google_auth_oauthlib) to avoid PKCE being added.
+    """
+    import urllib.parse
+    params = {
+        "client_id": settings.google_client_id,
+        "redirect_uri": settings.google_redirect_uri,
+        "response_type": "code",
+        "scope": "https://www.googleapis.com/auth/youtube.upload",
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": user["id"],
+    }
+    auth_url = "https://accounts.google.com/o/oauth2/auth?" + urllib.parse.urlencode(params)
     return {"url": auth_url}
 
 
 @app.get("/auth/youtube/callback")
 async def youtube_callback(request: Request):
     """Handle Google OAuth callback, store token in user record."""
-    from google_auth_oauthlib.flow import Flow
     from database import update_user
     import requests as http_requests
 
