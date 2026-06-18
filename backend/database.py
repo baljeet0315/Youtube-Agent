@@ -28,7 +28,7 @@ def get_or_create_user(clerk_id: str, email: str, name: str = None, avatar_url: 
 
     new_user = sb.table("users").insert({
         "clerk_id": clerk_id,
-        "email": email,
+        "email": email or None,
         "name": name,
         "avatar_url": avatar_url,
     }).execute()

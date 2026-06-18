@@ -53,7 +53,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
         payload = jwt.decode(token, public_key, algorithms=["RS256"])
 
         clerk_id = payload.get("sub")
-        email = payload.get("email", "")
+        email = payload.get("email") or None
 
         if not clerk_id:
             raise HTTPException(status_code=401, detail="Invalid token payload")
