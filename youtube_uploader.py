@@ -181,8 +181,18 @@ def upload_video_with_token(video_path: str, script: dict, token_json: str,
         YouTube video URL
     """
     from google.oauth2.credentials import Credentials
+    import datetime
 
     token_data = json.loads(token_json)
+
+    # Parse expiry if stored
+    expiry = None
+    if token_data.get("expiry"):
+        try:
+            expiry = datetime.datetime.fromisoformat(token_data["expiry"].replace("Z", "+00:00"))
+        except Exception:
+            expiry = None
+
     credentials = Credentials(
         token=token_data.get("token"),
         refresh_token=token_data.get("refresh_token"),
@@ -190,11 +200,18 @@ def upload_video_with_token(video_path: str, script: dict, token_json: str,
         client_id=token_data.get("client_id"),
         client_secret=token_data.get("client_secret"),
         scopes=token_data.get("scopes", SCOPES),
+        expiry=expiry,
     )
 
-    # Refresh if expired
-    if not credentials.valid and credentials.refresh_token:
-        credentials.refresh(Request())
+    # Always refresh — access tokens expire in 1 hour, refresh token is long-lived
+    if credentials.refresh_token:
+        try:
+            credentials.refresh(Request())
+        except Exception as e:
+            raise RuntimeError(
+                f"YouTube token refresh failed: {e}. "
+                "Please reconnect your YouTube account in Settings."
+            )
 
     youtube = build("youtube", "v3", credentials=credentials)
 

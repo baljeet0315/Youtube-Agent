@@ -285,7 +285,10 @@ async def youtube_callback(request: Request):
     if "error" in token_result:
         raise HTTPException(status_code=400, detail=f"Token exchange failed: {token_result}")
 
-    # Store token as JSON in user record
+    # Store token as JSON in user record (include expiry so refresh works correctly)
+    import datetime
+    expires_in = token_result.get("expires_in", 3600)
+    expiry = (datetime.datetime.utcnow() + datetime.timedelta(seconds=expires_in)).isoformat() + "Z"
     token_data = json.dumps({
         "token": token_result.get("access_token"),
         "refresh_token": token_result.get("refresh_token"),
@@ -293,6 +296,7 @@ async def youtube_callback(request: Request):
         "client_id": settings.google_client_id,
         "client_secret": settings.google_client_secret,
         "scopes": token_result.get("scope", "").split(),
+        "expiry": expiry,
     })
 
     update_user(state, {"youtube_token": token_data})
