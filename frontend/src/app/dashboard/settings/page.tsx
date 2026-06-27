@@ -103,23 +103,21 @@ export default function SettingsPage() {
               <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${user.has_youtube ? "bg-green-50 text-green-600" : "bg-gray-100 text-gray-500"}`}>
                 {user.has_youtube ? "Active" : "Not set up"}
               </span>
-              {!user.has_youtube && (
-                <button
-                  onClick={async () => {
-                    const token = await getToken();
-                    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/youtube/url`, {
-                      headers: { Authorization: `Bearer ${token}` },
-                    });
-                    if (res.ok) {
-                      const { url } = await res.json();
-                      window.location.href = url;
-                    }
-                  }}
-                  className="text-xs px-3 py-1 bg-red-600 text-white rounded-full font-medium hover:bg-red-700 transition"
-                >
-                  Connect
-                </button>
-              )}
+              <button
+                onClick={async () => {
+                  const token = await getToken();
+                  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/youtube/url`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  if (res.ok) {
+                    const { url } = await res.json();
+                    window.location.href = url;
+                  }
+                }}
+                className={`text-xs px-3 py-1 rounded-full font-medium transition ${user.has_youtube ? "bg-gray-100 text-gray-600 hover:bg-gray-200" : "bg-red-600 text-white hover:bg-red-700"}`}
+              >
+                {user.has_youtube ? "Reconnect" : "Connect"}
+              </button>
             </div>
           </div>
         </div>
