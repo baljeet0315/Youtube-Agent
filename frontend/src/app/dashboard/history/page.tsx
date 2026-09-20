@@ -15,7 +15,7 @@ export default function HistoryPage() {
 
   useEffect(() => {
     (async () => {
-      const token = await getToken();
+      const token = await getToken({ template: "Youtube-agent-emailID" });
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/users/me/logs`, {
         headers: { Authorization: `Bearer ${token}` },
       });

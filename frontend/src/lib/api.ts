@@ -8,7 +8,7 @@ const api = axios.create({
 api.interceptors.request.use(async (config) => {
   try {
     const { getToken } = await import("@clerk/nextjs/client" as any);
-    const token = await getToken();
+    const token = await getToken({ template: "Youtube-agent-emailID" });
     if (token) config.headers.Authorization = `Bearer ${token}`;
   } catch {}
   return config;

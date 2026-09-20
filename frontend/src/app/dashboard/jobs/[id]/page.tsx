@@ -23,7 +23,7 @@ export default function JobPage() {
   const [approving, setApproving] = useState(false);
 
   const fetchJob = async () => {
-    const token = await getToken();
+    const token = await getToken({ template: "Youtube-agent-emailID" });
     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${id}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -46,7 +46,7 @@ export default function JobPage() {
 
   const handleApprove = async () => {
     setApproving(true);
-    const token = await getToken();
+    const token = await getToken({ template: "Youtube-agent-emailID" });
     await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${id}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },

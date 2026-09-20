@@ -21,7 +21,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     (async () => {
-      const token = await getToken();
+      const token = await getToken({ template: "Youtube-agent-emailID" });
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/users/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -37,7 +37,7 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     setSaving(true);
-    const token = await getToken();
+    const token = await getToken({ template: "Youtube-agent-emailID" });
     await fetch(`${process.env.NEXT_PUBLIC_API_URL}/users/me`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -105,7 +105,7 @@ export default function SettingsPage() {
               </span>
               <button
                 onClick={async () => {
-                  const token = await getToken();
+                  const token = await getToken({ template: "Youtube-agent-emailID" });
                   const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/youtube/url`, {
                     headers: { Authorization: `Bearer ${token}` },
                   });

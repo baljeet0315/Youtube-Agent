@@ -62,7 +62,7 @@ export default function CreatePage() {
     setError("");
 
     try {
-      const token = await getToken();
+      const token = await getToken({ template: "Youtube-agent-emailID" });
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs`, {
         method: "POST",
         headers: {
