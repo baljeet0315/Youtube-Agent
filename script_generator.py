@@ -234,7 +234,7 @@ def _normalize(script: dict, narration_override: str | None, duration_hint_total
     script["narration"] = narration
 
     # Hook = first sentence, always derived so it can't drift
-    first = re.split(r"(?<=[.!?])\s+", narration, maxsplit=1)[0]
+    first = re.split(r"(?<=[.!?।॥])\s+", narration, maxsplit=1)[0]
     script["hook"] = first.strip()
 
     script.setdefault("music_mood", "calm")

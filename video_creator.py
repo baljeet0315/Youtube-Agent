@@ -153,7 +153,11 @@ def ken_burns_clip(image_path: str, duration: float, motion: str = "zoom_in") ->
 # ── Scene timing from word timestamps ───────────────────────────────────────
 
 def _norm_tokens(text: str) -> list:
-    return [t for t in re.sub(r"[^\w'\s-]", " ", text.lower()).split() if t]
+    """Lowercase, strip punctuation (any script), split on whitespace.
+    Uses Unicode categories so Gurmukhi/Devanagari vowel signs are kept intact."""
+    import unicodedata
+    cleaned = "".join(" " if unicodedata.category(ch).startswith("P") else ch for ch in text.lower())
+    return cleaned.split()
 
 
 def scene_timings(script: dict, words: list, audio_duration: float) -> list:

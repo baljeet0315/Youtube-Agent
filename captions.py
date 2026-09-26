@@ -16,11 +16,42 @@ MAX_CHUNK_SECONDS = 1.6
 STROKE_W = 4
 
 
-def _font(size: int):
-    try:
-        return ImageFont.truetype(config.CAPTION_FONT, size)
-    except Exception:
-        return ImageFont.load_default()
+# Script-specific fonts (Debian fonts-noto-core paths). DejaVu covers Latin/Cyrillic/Greek.
+SCRIPT_FONTS = [
+    # (unicode range, font path)
+    ((0x0A00, 0x0A7F), "/usr/share/fonts/truetype/noto/NotoSansGurmukhi-Bold.ttf"),   # Punjabi
+    ((0x0900, 0x097F), "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf"), # Hindi/Marathi
+    ((0x0600, 0x06FF), "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf"),     # Urdu/Arabic
+    ((0x0980, 0x09FF), "/usr/share/fonts/truetype/noto/NotoSansBengali-Bold.ttf"),
+    ((0x0B80, 0x0BFF), "/usr/share/fonts/truetype/noto/NotoSansTamil-Bold.ttf"),
+    ((0x0C00, 0x0C7F), "/usr/share/fonts/truetype/noto/NotoSansTelugu-Bold.ttf"),
+    ((0x0A80, 0x0AFF), "/usr/share/fonts/truetype/noto/NotoSansGujarati-Bold.ttf"),
+]
+_font_for_text_cache = {}
+
+
+def _font_path_for(text: str) -> str:
+    """Pick a font that has glyphs for the dominant non-Latin script in `text`."""
+    for (lo, hi), path in SCRIPT_FONTS:
+        if any(lo <= ord(ch) <= hi for ch in text):
+            if os.path.exists(path):
+                return path
+            # Bold missing? try Regular of the same family
+            alt = path.replace("-Bold", "-Regular")
+            if os.path.exists(alt):
+                return alt
+    return config.CAPTION_FONT
+
+
+def _font(size: int, text: str = ""):
+    path = _font_path_for(text) if text else config.CAPTION_FONT
+    key = (path, size)
+    if key not in _font_for_text_cache:
+        try:
+            _font_for_text_cache[key] = ImageFont.truetype(path, size)
+        except Exception:
+            _font_for_text_cache[key] = ImageFont.load_default()
+    return _font_for_text_cache[key]
 
 
 def _clean(w: str) -> str:
@@ -38,7 +69,7 @@ def chunk_words(words: list) -> list:
         span = cur[-1]["end"] - cur[0]["start"]
         if (len(cur) >= MAX_WORDS_PER_CHUNK
                 or span >= MAX_CHUNK_SECONDS
-                or text.endswith((".", "!", "?", ",", ";", ":", "—"))):
+                or text.endswith((".", "!", "?", ",", ";", ":", "—", "।", "॥"))):
             chunks.append(cur)
             cur = []
     if cur:
@@ -59,7 +90,7 @@ def _render_chunk(chunk: list, active_idx: int, video_w: int, font, highlight: s
     max_w = video_w - 80
     if total_w > max_w:
         scale = max_w / total_w
-        font = _font(max(28, int(font.size * scale)))
+        font = _font(max(28, int(font.size * scale)), " ".join(texts))
         widths = [draw_probe.textlength(t, font=font) for t in texts]
         space_w = draw_probe.textlength(" ", font=font)
         total_w = sum(widths) + space_w * (len(texts) - 1)
@@ -84,7 +115,8 @@ def build_caption_clips(words: list, video_w: int, video_h: int, fps: int) -> li
         return []
     from moviepy.editor import ImageClip
 
-    font = _font(config.CAPTION_FONT_SIZE)
+    all_text = " ".join(w["text"] for w in words)
+    font = _font(config.CAPTION_FONT_SIZE, all_text)
     highlight = config.CAPTION_HIGHLIGHT
     y_center = int(video_h * config.CAPTION_Y_RATIO)
     clips = []

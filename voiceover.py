@@ -29,7 +29,7 @@ def generate_voiceover(text: str, output_filename: str = "voiceover.mp3") -> str
 
     payload = {
         "text": text,
-        "model_id": "eleven_turbo_v2",
+        "model_id": getattr(config, "ELEVENLABS_MODEL", "eleven_multilingual_v2"),
         "voice_settings": {
             "stability": 0.5,
             "similarity_boost": 0.75,
@@ -106,7 +106,9 @@ def generate_voiceover_with_timestamps(text: str, output_filename: str = "voiceo
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
     headers = {"Content-Type": "application/json", "xi-api-key": config.ELEVENLABS_API_KEY}
-    payload = {"text": text, "model_id": "eleven_turbo_v2", "voice_settings": settings}
+    payload = {"text": text,
+               "model_id": getattr(config, "ELEVENLABS_MODEL", "eleven_multilingual_v2"),
+               "voice_settings": settings}
 
     print(f"\n🎙️  Generating voiceover with timestamps ({len(text.split())} words, voice {voice_id})...")
     words = []
