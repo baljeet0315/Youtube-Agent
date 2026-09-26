@@ -16,6 +16,7 @@ import anthropic
 import agent_config as config
 
 MODEL = "claude-opus-4-6"
+MAX_TOKENS = 6000   # non-Latin scripts are token-heavy; leave headroom
 
 # Speaking pace used for all length math. ~150 wpm.
 WORDS_PER_SECOND = 2.5
@@ -104,7 +105,14 @@ def _resolve_narration_style(narration_style: str) -> str:
     return NARRATION_PRESETS.get(key, narration_style.strip())
 
 
-def _schema_block(narration_instruction: str, word_target: int) -> str:
+def _schema_block(narration_instruction: str, word_target: int, excerpt_mode: str = "text") -> str:
+    if excerpt_mode == "range":
+        excerpt_field = ('"word_range": [first_word_index, last_word_index]  — 0-based, inclusive, counting '
+                         'whitespace-separated words of the narration. Scenes must be in order, contiguous, '
+                         'and cover every word exactly once.')
+    else:
+        excerpt_field = ('"narration_excerpt": "The exact sentence(s) from `narration` this scene plays under. '
+                         'Must be a verbatim substring. Scenes must cover the whole narration in order with no overlap."')
     return f"""Return ONE JSON object with exactly these fields and nothing else:
 {{
   "version": 2,
@@ -122,7 +130,7 @@ def _schema_block(narration_instruction: str, word_target: int) -> str:
   "scenes": [
     {{
       "id": 1,
-      "narration_excerpt": "The exact sentence(s) from `narration` this scene plays under. Must be a verbatim substring. Scenes must cover the whole narration in order with no overlap.",
+      {excerpt_field},
       "duration_hint": 5,
       "caption": "3–5 word title-card text, or null. Not a subtitle — a mood line.",
       "visual_prompt": "A standalone image prompt (25–50 words): subject, setting, action, lighting, camera angle, mood. If subject_consistency is set and the subject appears, repeat that wording exactly. No text or letters in the image.",
@@ -177,25 +185,35 @@ Writing rules — these decide whether the video gets watched:
 
 
 def _text_prompt(source_text: str, style: str, narration_desc: str) -> tuple[str, str]:
-    words = len(source_text.split())
+    toks = source_text.split()
+    words = len(toks)
     style_hint = CONTENT_STYLE_HINTS.get(style.lower(), CONTENT_STYLE_HINTS["storytelling"])
-    schema = _schema_block("The provided narration, copied EXACTLY. Do not change a single word.", words)
+    schema = _schema_block('Leave this as an empty string "" — the narration is supplied by the system.',
+                           words, excerpt_mode="range")
+    numbered = "\n".join(f"{i}: {t}" for i, t in enumerate(toks))
 
     system = f"""You are a film editor turning a given passage into a vertical short-form video.
-The narration is FIXED — the user wrote it. You do not rewrite, trim, or improve it.
+The narration is FIXED — the user wrote it, in whatever language it is in. You do not rewrite,
+trim, translate or copy it. You only plan the video around it.
 Delivery voice (for title/description tone only): {narration_desc}
+Title, description and tags should be in the SAME LANGUAGE as the narration. Visual prompts are
+always in English (the image model only understands English).
 You always answer with valid JSON only — no prose, no markdown fences."""
 
-    user = f"""Here is the narration, exactly as it will be spoken ({words} words):
+    user = f"""Here is the narration ({words} words), then the same narration with each word numbered:
 
 <narration>
 {source_text}
 </narration>
 
+<numbered_words>
+{numbered}
+</numbered_words>
+
 Your job: build the video around it.
-- Copy the narration into the "narration" field EXACTLY, character for character.
-- Break it into scenes on sentence boundaries; each scene's narration_excerpt must be a verbatim substring, in order, covering all of it.
-- Write visual prompts that illustrate what each passage evokes — literal when the text is concrete, atmospheric when it is abstract.
+- Do NOT copy the narration anywhere in your output. Use "word_range" indexes to say which words each scene covers.
+- Break into scenes on sentence boundaries (sentence marks include . ! ? । ॥). 5–8 scenes, contiguous, in order, every word covered exactly once. The last scene must end at index {words - 1}.
+- Write visual prompts (English) that illustrate what each passage evokes — literal when the text is concrete, atmospheric when it is abstract.
 - Content style for framing: {style_hint}
 
 {schema}"""
@@ -203,6 +221,23 @@ Your job: build the video around it.
 
 
 # ── Post-processing ──────────────────────────────────────────────────────────
+
+def _call_json(client, system: str, user: str) -> dict:
+    """Call the model; if the reply isn't valid JSON, ask once for a corrected version."""
+    msgs = [{"role": "user", "content": user}]
+    resp = client.messages.create(model=MODEL, max_tokens=MAX_TOKENS, system=system, messages=msgs)
+    raw = resp.content[0].text
+    try:
+        return _parse_json(raw)
+    except (ValueError, json.JSONDecodeError) as e:
+        if getattr(resp, "stop_reason", "") == "max_tokens":
+            hint = "Your previous reply was cut off. Reply again with the COMPLETE JSON object and keep visual prompts under 40 words."
+        else:
+            hint = f"Your previous reply was not valid JSON ({e}). Reply again with only the corrected, complete JSON object."
+        msgs += [{"role": "assistant", "content": raw}, {"role": "user", "content": hint}]
+        resp = client.messages.create(model=MODEL, max_tokens=MAX_TOKENS, system=system, messages=msgs)
+        return _parse_json(resp.content[0].text)
+
 
 def _parse_json(raw: str) -> dict:
     raw = raw.strip()
@@ -250,6 +285,25 @@ def _normalize(script: dict, narration_override: str | None, duration_hint_total
     scenes = script["scenes"]
     if not isinstance(scenes, list) or not scenes:
         raise ValueError("Script has no scenes")
+
+    # word_range → narration_excerpt (range mode: model never copies the text)
+    toks = narration.split()
+    if any("word_range" in s for s in scenes):
+        for s in scenes:
+            wr = s.get("word_range")
+            if isinstance(wr, list) and len(wr) == 2:
+                a, b = int(wr[0]), int(wr[1])
+                a, b = max(0, a), min(len(toks) - 1, b)
+                if b >= a:
+                    s["narration_excerpt"] = " ".join(toks[a:b + 1])
+        # Guarantee full coverage: stretch first/last scene to the ends
+        if scenes and toks:
+            first_wr = scenes[0].get("word_range")
+            last_wr = scenes[-1].get("word_range")
+            if isinstance(first_wr, list) and first_wr[0] != 0:
+                scenes[0]["narration_excerpt"] = " ".join(toks[0:int(first_wr[1]) + 1])
+            if isinstance(last_wr, list) and int(last_wr[1]) < len(toks) - 1:
+                scenes[-1]["narration_excerpt"] = " ".join(toks[int(last_wr[0]):])
 
     # Tags: clean
     script["tags"] = [str(t).lstrip("#").strip().lower() for t in script.get("tags", []) if str(t).strip()][:15]
@@ -318,13 +372,7 @@ def generate_script(
         narration_override = None
         intended_seconds = duration_seconds
 
-    message = client.messages.create(
-        model=MODEL,
-        max_tokens=2500,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    script = _parse_json(message.content[0].text)
+    script = _call_json(client, system, user)
     script = _normalize(script, narration_override, intended_seconds)
 
     # Idea mode: enforce the hard cap even if the model overshoots
@@ -406,20 +454,28 @@ def regenerate_script(script: dict, feedback: str) -> dict:
                        if k in {"id", "narration_excerpt", "duration_hint", "caption",
                                 "visual_prompt", "motion", "visual_query"}}
                       for s in prev.get("scenes", [])]
-    prev_json = json.dumps(prev, ensure_ascii=False, indent=1)
     banned = ", ".join(BANNED_PHRASES)
 
     if input_mode == "text":
         narration_override = script["narration"]
-        schema = _schema_block("The existing narration, copied EXACTLY. It must not change.", word_target)
-        lock_rule = ("The narration is the user's own text and is LOCKED. Do not change a single word of it. "
-                     "Apply the feedback to title, description, tags, music mood, scene breakdown and visual prompts only.")
+        toks = narration_override.split()
+        schema = _schema_block('Leave this as an empty string "" — the narration is supplied by the system.',
+                               word_target, excerpt_mode="range")
+        numbered = "\n".join(f"{i}: {t}" for i, t in enumerate(toks))
+        lock_rule = ("The narration is the user's own text and is LOCKED. Do not copy or change it. "
+                     "Describe scenes with word_range indexes into this numbered word list "
+                     f"(last index {len(toks) - 1}):\n<numbered_words>\n{numbered}\n</numbered_words>\n"
+                     "Apply the feedback to title, description, tags, music mood, scene breakdown and visual prompts only. "
+                     "Visual prompts in English; title/description/tags in the narration's language.")
+        prev.pop("narration", None)
     else:
         narration_override = None
         schema = _schema_block("Full spoken narration only. No stage directions.", word_target)
         lock_rule = (f"You may rewrite anything, including the narration. Keep it about {word_target} words "
                      f"(hard max {min(int(word_target * 1.15), MAX_WORDS)}). Keep the hook rules: first sentence "
                      f"under 12 words, specific and surprising. Never use: {banned}.")
+
+    prev_json = json.dumps(prev, ensure_ascii=False, indent=1)
 
     system = f"""You revise narration and shot lists for vertical short-form video (YouTube Shorts).
 Voice: {narration_desc}
@@ -442,13 +498,7 @@ for; keep what it doesn't mention unless it must change to stay coherent. {lock_
 
 {schema}"""
 
-    message = client.messages.create(
-        model=MODEL,
-        max_tokens=2500,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    new = _parse_json(message.content[0].text)
+    new = _call_json(client, system, user)
     new = _normalize(new, narration_override, intended)
 
     if input_mode == "idea" and len(new["narration"].split()) > MAX_WORDS:
