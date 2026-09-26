@@ -54,9 +54,13 @@ create table if not exists jobs (
   platform        text[] default array['youtube'],  -- ['youtube', 'instagram']
   privacy         text default 'private',
 
+  auto_render     boolean not null default false,   -- skip script review (scheduled runs)
+
   -- Status tracking
   status          text not null default 'pending',
-  -- pending → processing → preview_ready → approved → uploading → done → failed
+  -- pending → scripting → script_ready → rendering → preview_ready → uploading → done | failed
+  feedback_history   jsonb not null default '[]'::jsonb,  -- [{feedback, title_before}]
+  regeneration_count int   not null default 0,
   progress        int  default 0,              -- 0-100
   error_message   text,
   current_step    text,                        -- e.g. "Generating script..."

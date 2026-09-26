@@ -41,48 +41,105 @@ def set_progress(job_id: str, user_id: str, progress: int, step: str, status: st
                message=step, metadata={"progress": progress})
 
 
+def _fail(self, job_id: str, user_id: str, e: Exception, action: str):
+    error_msg = str(e)
+    update_job(job_id, {"status": "failed", "error_message": error_msg, "current_step": "Failed"})
+    log_action(user_id, action, job_id=job_id, level="error", message=error_msg)
+    raise self.retry(exc=e, countdown=10)
+
+
+# ── Stage 1: script only → script_ready ─────────────────────────────────────
+
+@celery_app.task(bind=True, max_retries=1)
+def generate_script_task(self, job_id: str, user_id: str, params: dict):
+    """Generate the script and stop for user review (script_ready)."""
+    try:
+        from script_generator import generate_script
+
+        input_mode = params.get("input_mode", "idea")
+        set_progress(job_id, user_id, 15,
+                     "Building script around your text..." if input_mode == "text"
+                     else "Writing script...", status="scripting")
+
+        script = generate_script(
+            params.get("topic", ""),
+            style=params.get("style", "educational"),
+            duration_seconds=params.get("duration", 45),
+            narration_style=params.get("narration_style", ""),
+            input_mode=input_mode,
+            source_text=params.get("source_text") or "",
+        )
+
+        update_job(job_id, {
+            "script": script,
+            "status": "script_ready",
+            "progress": 30,
+            "current_step": "Script ready — review before rendering",
+        })
+        log_action(user_id, "script_ready", job_id=job_id,
+                   message=f"Script: {script.get('title', '')}")
+
+        if params.get("auto_render"):
+            render_video_task.delay(job_id, user_id)
+
+    except Exception as e:
+        _fail(self, job_id, user_id, e, "script_failed")
+
+
+# ── Stage 1b: regenerate script from feedback → script_ready ────────────────
+
+@celery_app.task(bind=True, max_retries=1)
+def regenerate_script_task(self, job_id: str, user_id: str, feedback: str):
+    try:
+        from database import get_job
+        from script_generator import regenerate_script
+
+        job = get_job(job_id)
+        if not job or not job.get("script"):
+            raise ValueError("No script to regenerate")
+
+        set_progress(job_id, user_id, 15, "Rewriting script from your feedback...", status="scripting")
+        new_script = regenerate_script(job["script"], feedback)
+
+        history = list(job.get("feedback_history") or [])
+        history.append({"feedback": feedback, "title_before": job["script"].get("title")})
+
+        update_job(job_id, {
+            "script": new_script,
+            "status": "script_ready",
+            "progress": 30,
+            "current_step": "Revised script ready — review before rendering",
+            "feedback_history": history,
+            "regeneration_count": int(job.get("regeneration_count") or 0) + 1,
+        })
+        log_action(user_id, "script_regenerated", job_id=job_id, message=feedback[:200])
+
+    except Exception as e:
+        _fail(self, job_id, user_id, e, "regenerate_failed")
+
+
+# ── Stage 2: voice → footage → assemble → R2 → preview_ready ────────────────
+
 @celery_app.task(bind=True, max_retries=2)
-def generate_video_task(self, job_id: str, user_id: str, params: dict):
-    """
-    Full video generation pipeline as a background task.
-    Runs: Script → Voiceover → Footage → Assemble → Upload to R2
-    """
+def render_video_task(self, job_id: str, user_id: str):
+    """Render the approved script into a video."""
     import tempfile
 
     try:
-        # Import agent modules
-        from script_generator import generate_script
+        from database import get_job
         from voiceover import generate_voiceover
         from video_creator import create_video as assemble_video
         import agent_config
 
-        topic = params.get("topic", "")
-        style = params.get("style", "educational")
-        narration_style = params.get("narration_style", "")
-        voice_id = params.get("voice_id", agent_config.ELEVENLABS_VOICE_ID)
-        duration = params.get("duration", 45)
-        input_mode = params.get("input_mode", "idea")
-        source_text = params.get("source_text") or ""
+        job = get_job(job_id)
+        if not job or not job.get("script"):
+            raise ValueError("Job has no script to render")
+        script = job["script"]
+        voice_id = job.get("voice_id") or agent_config.ELEVENLABS_VOICE_ID
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # ── Step 1: Generate Script ──────────────────────────
-            set_progress(job_id, user_id, 10,
-                         "Building script around your text..." if input_mode == "text"
-                         else "Generating script...")
-            script = generate_script(
-                topic,
-                style=style,
-                duration_seconds=duration,
-                narration_style=narration_style,
-                input_mode=input_mode,
-                source_text=source_text,
-            )
-            update_job(job_id, {"script": script})
-            log_action(user_id, "script_generated", job_id=job_id,
-                       message=f"Script: {script.get('title', '')}")
-
             # ── Step 2: Voiceover ────────────────────────────────
-            set_progress(job_id, user_id, 30, "Generating voiceover...")
+            set_progress(job_id, user_id, 40, "Generating voiceover...", status="rendering")
             audio_path = os.path.join(tmpdir, "voice.mp3")
 
             # Temporarily override voice ID if user selected one
@@ -112,34 +169,43 @@ def generate_video_task(self, job_id: str, user_id: str, params: dict):
             video_url = upload_file(local_video_path, video_key, "video/mp4")
             audio_url = upload_file(audio_path, audio_key, "audio/mpeg")
 
-            # ── Save video record ────────────────────────────────
-            video_record = create_video(job_id, user_id, {
+            # ── Save video record (update if this is a re-render) ─
+            video_data = {
                 "title": script.get("title"),
                 "description": script.get("description"),
                 "tags": script.get("tags", []),
                 "video_url": video_url,
                 "audio_url": audio_url,
-            })
+                "youtube_url": None,
+                "youtube_status": None,
+            }
+            existing = job.get("videos") or []
+            if existing:
+                from database import update_video
+                update_video(existing[0]["id"], video_data)
+            else:
+                create_video(job_id, user_id, video_data)
 
             # ── Mark job as preview_ready ────────────────────────
             update_job(job_id, {
                 "status": "preview_ready",
                 "progress": 100,
                 "current_step": "Preview ready — awaiting approval",
+                "error_message": None,
             })
             log_action(user_id, "preview_ready", job_id=job_id,
                        message="Video ready for preview and approval")
 
     except Exception as e:
-        error_msg = str(e)
-        update_job(job_id, {
-            "status": "failed",
-            "error_message": error_msg,
-            "current_step": "Failed",
-        })
-        log_action(user_id, "job_failed", job_id=job_id,
-                   level="error", message=error_msg)
-        raise self.retry(exc=e, countdown=10)
+        _fail(self, job_id, user_id, e, "render_failed")
+
+
+# ── Legacy one-shot pipeline (kept for auto_render / scheduled runs) ────────
+
+@celery_app.task(bind=True, max_retries=1)
+def generate_video_task(self, job_id: str, user_id: str, params: dict):
+    params = dict(params, auto_render=True)
+    generate_script_task.apply(args=(job_id, user_id, params))
 
 
 @celery_app.task(bind=True, max_retries=2)

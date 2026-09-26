@@ -150,7 +150,16 @@ def _idea_prompt(topic: str, style: str, narration_desc: str, duration: int) -> 
 Voice: {narration_desc}
 You always answer with valid JSON only — no prose, no markdown fences."""
 
-    user = f"""Write a {duration}-second Short about: "{topic}"
+    user = f"""The user asked for a {duration}-second Short. Their request, in their own words:
+
+<request>
+{topic}
+</request>
+
+The request may be phrased as an instruction ("create me a script for…", "make a video about…").
+Extract the actual SUBJECT and write about that — never echo the instruction wording in the title
+or narration. If the request itself specifies a tone, audience, angle or length, honour it; it
+overrides the defaults below.
 
 Content style: {style_hint}
 
@@ -326,11 +335,133 @@ def generate_script(
 
     script["input_mode"] = input_mode
     script["narration_style"] = narration_style or "documentary"
+    script["style"] = style
+    script["intended_seconds"] = intended_seconds
 
     print(f"\n✅ Script generated: \"{script['title']}\"")
     print(f"   Mode: {input_mode} · {len(script['narration'].split())} words · "
           f"{len(script['scenes'])} scenes · music: {script['music_mood']}")
     return script
+
+
+# ── Review-gate helpers ──────────────────────────────────────────────────────
+
+EDITABLE_TOP = {"title", "description", "tags", "narration", "music_mood"}
+EDITABLE_SCENE = {"visual_prompt", "caption", "motion", "visual_query", "narration_excerpt"}
+
+
+def apply_script_edits(script: dict, edits: dict) -> dict:
+    """
+    Merge user edits from the Script Review UI and re-normalize.
+    edits = {"title"?, "description"?, "tags"?, "narration"?, "music_mood"?,
+             "scenes"?: [{"id": 1, "visual_prompt"?, "caption"?, "motion"?}, ...]}
+    In text mode the narration is locked (it's the user's own words by design);
+    to change it they start a new job.
+    """
+    script = json.loads(json.dumps(script))  # deep copy
+    for k in EDITABLE_TOP:
+        if k in edits and edits[k] is not None:
+            if k == "narration" and script.get("input_mode") == "text":
+                continue
+            script[k] = edits[k]
+
+    if edits.get("scenes"):
+        by_id = {s.get("id"): s for s in script.get("scenes", [])}
+        for e in edits["scenes"]:
+            target = by_id.get(e.get("id"))
+            if not target:
+                continue
+            for k in EDITABLE_SCENE:
+                if k in e and e[k] is not None:
+                    target[k] = e[k]
+
+    narration_override = script["narration"] if script.get("input_mode") == "text" else None
+    intended = int(script.get("intended_seconds") or max(15, round(estimate_seconds(script["narration"]))))
+    normalized = _normalize(script, narration_override, intended)
+    normalized["edited"] = True
+    return normalized
+
+
+def regenerate_script(script: dict, feedback: str) -> dict:
+    """
+    Rewrite a script using the user's feedback (Approach 3).
+    Idea mode: narration, scenes, title etc. may all change.
+    Text mode:  narration is fixed; only title/description/scenes/prompts change.
+    """
+    feedback = (feedback or "").strip()
+    if not feedback:
+        raise ValueError("Feedback is empty")
+
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    input_mode = script.get("input_mode", "idea")
+    narration_desc = _resolve_narration_style(script.get("narration_style", ""))
+    style = script.get("style", "educational")
+    intended = int(script.get("intended_seconds") or 45)
+    word_target = int(intended * WORDS_PER_SECOND)
+
+    # Strip derived/compat fields so the model sees the clean v2 shape
+    prev = {k: v for k, v in script.items()
+            if k in {"title", "description", "tags", "narration", "music_mood", "style_guide", "scenes"}}
+    prev["scenes"] = [{k: v for k, v in s.items()
+                       if k in {"id", "narration_excerpt", "duration_hint", "caption",
+                                "visual_prompt", "motion", "visual_query"}}
+                      for s in prev.get("scenes", [])]
+    prev_json = json.dumps(prev, ensure_ascii=False, indent=1)
+    banned = ", ".join(BANNED_PHRASES)
+
+    if input_mode == "text":
+        narration_override = script["narration"]
+        schema = _schema_block("The existing narration, copied EXACTLY. It must not change.", word_target)
+        lock_rule = ("The narration is the user's own text and is LOCKED. Do not change a single word of it. "
+                     "Apply the feedback to title, description, tags, music mood, scene breakdown and visual prompts only.")
+    else:
+        narration_override = None
+        schema = _schema_block("Full spoken narration only. No stage directions.", word_target)
+        lock_rule = (f"You may rewrite anything, including the narration. Keep it about {word_target} words "
+                     f"(hard max {min(int(word_target * 1.15), MAX_WORDS)}). Keep the hook rules: first sentence "
+                     f"under 12 words, specific and surprising. Never use: {banned}.")
+
+    system = f"""You revise narration and shot lists for vertical short-form video (YouTube Shorts).
+Voice: {narration_desc}
+You always answer with valid JSON only — no prose, no markdown fences."""
+
+    user = f"""Here is the current script:
+
+<current_script>
+{prev_json}
+</current_script>
+
+The user reviewed it and said:
+
+<feedback>
+{feedback}
+</feedback>
+
+Revise the script to address the feedback directly and specifically. Change what the feedback asks
+for; keep what it doesn't mention unless it must change to stay coherent. {lock_rule}
+
+{schema}"""
+
+    message = client.messages.create(
+        model=MODEL,
+        max_tokens=2500,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+    )
+    new = _parse_json(message.content[0].text)
+    new = _normalize(new, narration_override, intended)
+
+    if input_mode == "idea" and len(new["narration"].split()) > MAX_WORDS:
+        raise ValueError("Revised narration is too long for a Short — ask for something shorter.")
+
+    # Carry job-level metadata forward
+    for k in ("input_mode", "narration_style", "style", "intended_seconds"):
+        if k in script:
+            new[k] = script[k]
+    new["regenerated_from_feedback"] = feedback
+
+    print(f"\n♻️  Script regenerated: \"{new['title']}\" (feedback: {feedback[:60]}…)")
+    return new
 
 
 if __name__ == "__main__":

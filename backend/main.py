@@ -17,12 +17,13 @@ from database import (
     update_user, get_user_logs, log_action
 )
 try:
-    from tasks import generate_video_task, upload_to_platforms_task
+    from tasks import (generate_script_task, regenerate_script_task, render_video_task,
+                       generate_video_task, upload_to_platforms_task)
     CELERY_AVAILABLE = True
 except Exception:
     CELERY_AVAILABLE = False
-    generate_video_task = None
-    upload_to_platforms_task = None
+    generate_script_task = regenerate_script_task = render_video_task = None
+    generate_video_task = upload_to_platforms_task = None
 
 settings = get_settings()
 
@@ -96,6 +97,7 @@ class CreateJobRequest(BaseModel):
     privacy: str = "private"
     input_mode: str = "idea"                # "idea" | "text"
     source_text: Optional[str] = None       # used verbatim when input_mode == "text"
+    auto_render: bool = False               # skip the script review gate (scheduled runs)
 
 
 def _script_helpers():
@@ -165,6 +167,7 @@ async def create_job_endpoint(
         "privacy": body.privacy,
         "input_mode": input_mode,
         "source_text": source_text if input_mode == "text" else None,
+        "auto_render": bool(body.auto_render),
         "status": "pending",
         "progress": 0,
         "current_step": "Queued...",
@@ -172,18 +175,106 @@ async def create_job_endpoint(
 
     job = create_job(user["id"], params)
 
-    # Kick off background task
+    # Stage 1 only: write the script, then wait for review (unless auto_render)
     if CELERY_AVAILABLE:
-        generate_video_task.delay(job["id"], user["id"], params)
+        generate_script_task.delay(job["id"], user["id"], params)
 
     log_action(user["id"], "job_queued", job_id=job["id"],
-               message=f"Job queued: {body.topic[:50]}")
+               message=f"Job queued: {topic[:50]}")
 
     return {
         "job_id": job["id"],
         "status": "pending",
-        "message": "Video generation started",
+        "message": "Writing script",
     }
+
+
+def _owned_job(job_id: str, user: dict) -> dict:
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["user_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return job
+
+
+class ScriptEditRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    tags: Optional[list[str]] = None
+    narration: Optional[str] = None
+    music_mood: Optional[str] = None
+    scenes: Optional[list[dict]] = None     # [{id, visual_prompt?, caption?, motion?}]
+
+
+@app.patch("/jobs/{job_id}/script")
+async def edit_script(job_id: str, body: ScriptEditRequest, user: dict = Depends(get_current_user)):
+    """Save the user's manual edits from the Script Review screen."""
+    from database import update_job
+    job = _owned_job(job_id, user)
+    if job["status"] != "script_ready":
+        raise HTTPException(status_code=400, detail=f"Script can't be edited in status '{job['status']}'")
+
+    import sys
+    for p in ("/agent", os.path.join(os.path.dirname(__file__), "..")):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    from script_generator import apply_script_edits, MAX_WORDS
+
+    edits = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "narration" in edits and len(edits["narration"].split()) > MAX_WORDS:
+        raise HTTPException(status_code=400, detail=f"Narration is over {MAX_WORDS} words — too long for a Short.")
+
+    try:
+        new_script = apply_script_edits(job["script"], edits)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    update_job(job_id, {"script": new_script})
+    log_action(user["id"], "script_edited", job_id=job_id, message=", ".join(edits.keys()))
+    return {"success": True, "script": new_script}
+
+
+class RegenerateRequest(BaseModel):
+    feedback: str
+
+
+@app.post("/jobs/{job_id}/regenerate")
+async def regenerate_job_script(job_id: str, body: RegenerateRequest, user: dict = Depends(get_current_user)):
+    """Rewrite the script from free-text feedback; job returns to script_ready."""
+    from database import update_job
+    job = _owned_job(job_id, user)
+    if job["status"] not in ("script_ready", "failed"):
+        raise HTTPException(status_code=400, detail=f"Can't regenerate in status '{job['status']}'")
+    if not job.get("script"):
+        raise HTTPException(status_code=400, detail="No script to regenerate yet")
+    feedback = body.feedback.strip()
+    if len(feedback) < 3:
+        raise HTTPException(status_code=400, detail="Tell me what to change.")
+
+    update_job(job_id, {"status": "scripting", "progress": 10,
+                        "current_step": "Rewriting script from your feedback..."})
+    if CELERY_AVAILABLE:
+        regenerate_script_task.delay(job_id, user["id"], feedback)
+    return {"success": True, "message": "Rewriting script"}
+
+
+@app.post("/jobs/{job_id}/render")
+async def render_job(job_id: str, user: dict = Depends(get_current_user)):
+    """User approved the script — render voice + video."""
+    from database import update_job
+    job = _owned_job(job_id, user)
+    if job["status"] not in ("script_ready", "failed", "preview_ready"):
+        raise HTTPException(status_code=400, detail=f"Can't render in status '{job['status']}'")
+    if not job.get("script"):
+        raise HTTPException(status_code=400, detail="No script to render yet")
+
+    update_job(job_id, {"status": "rendering", "progress": 35,
+                        "current_step": "Starting render...", "error_message": None})
+    if CELERY_AVAILABLE:
+        render_video_task.delay(job_id, user["id"])
+    log_action(user["id"], "render_started", job_id=job_id)
+    return {"success": True, "message": "Rendering"}
 
 
 @app.get("/jobs")

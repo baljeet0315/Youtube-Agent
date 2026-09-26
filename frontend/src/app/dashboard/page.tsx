@@ -129,7 +129,7 @@ export default function CreatePage() {
     <div>
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-gray-900">Create a video</h1>
-        <p className="text-gray-400 text-sm mt-1">Fill in your idea and we'll handle the rest</p>
+        <p className="text-gray-400 text-sm mt-1">Ask for a script, review it, then render</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
@@ -160,12 +160,12 @@ export default function CreatePage() {
 
           {inputMode === "idea" ? (
             <>
-              <label className="field-label">Topic or idea</label>
+              <label className="field-label">What do you want?</label>
               <textarea
                 rows={3}
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                placeholder="e.g. Why do humans laugh? The psychology behind it..."
+                placeholder='Just ask — e.g. "create me a script for why sports is important for a child"'
                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 outline-none transition"
               />
             </>
@@ -389,8 +389,11 @@ export default function CreatePage() {
           ) : (
             <Sparkles size={16} />
           )}
-          {loading ? "Starting..." : "Generate video"}
+          {loading ? "Starting..." : "Create script"}
         </button>
+        <p className="text-xs text-gray-400 text-center -mt-2">
+          You'll review the script before any video is rendered.
+        </p>
       </form>
     </div>
   );
