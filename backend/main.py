@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
+import os
 import uuid
 import json
 
@@ -86,13 +87,44 @@ async def get_logs(user: dict = Depends(get_current_user)):
 # ── Jobs ──────────────────────────────────────────────────────
 
 class CreateJobRequest(BaseModel):
-    topic: str
+    topic: str = ""
     style: str = "educational"
-    narration_style: Optional[str] = None   # e.g. "David Attenborough", "energetic host"
+    narration_style: Optional[str] = None   # preset key or free text
     voice_id: Optional[str] = None
     duration: int = 45
     platform: list[str] = ["youtube"]
     privacy: str = "private"
+    input_mode: str = "idea"                # "idea" | "text"
+    source_text: Optional[str] = None       # used verbatim when input_mode == "text"
+
+
+def _script_helpers():
+    """Lazy import of the agent module (lives in /agent inside the container)."""
+    import sys
+    for p in ("/agent", os.path.join(os.path.dirname(__file__), "..")):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    from script_generator import validate_source_text, NARRATION_PRESETS, MAX_WORDS
+    return validate_source_text, NARRATION_PRESETS, MAX_WORDS
+
+
+@app.get("/script/presets")
+async def script_presets():
+    """Narration presets + length limits for the create form."""
+    _, presets, max_words = _script_helpers()
+    return {
+        "presets": [{"key": k, "description": v} for k, v in presets.items()],
+        "max_words": max_words,
+        "words_per_second": 2.5,
+        "max_seconds": 60,
+    }
+
+
+@app.post("/script/validate")
+async def script_validate(body: dict):
+    """Live check for pasted text length (no auth needed; nothing stored)."""
+    validate_source_text, _, _ = _script_helpers()
+    return validate_source_text(body.get("text", "") or "")
 
 
 @app.post("/jobs")
@@ -104,20 +136,35 @@ async def create_job_endpoint(
     Submit a new video generation job.
     Returns immediately with job ID — generation runs in background.
     """
-    if not body.topic.strip():
-        raise HTTPException(status_code=400, detail="Topic cannot be empty")
+    input_mode = body.input_mode if body.input_mode in ("idea", "text") else "idea"
+    source_text = (body.source_text or "").strip()
+    topic = body.topic.strip()
 
-    if body.duration < 15 or body.duration > 60:
-        raise HTTPException(status_code=400, detail="Duration must be between 15 and 60 seconds")
+    if input_mode == "text":
+        validate_source_text, _, _ = _script_helpers()
+        check = validate_source_text(source_text)
+        if not check["ok"]:
+            raise HTTPException(status_code=400, detail=check["message"])
+        if not topic:
+            topic = source_text[:80]          # display label for the job list
+        duration = check["est_seconds"]
+    else:
+        if not topic:
+            raise HTTPException(status_code=400, detail="Topic cannot be empty")
+        if body.duration < 15 or body.duration > 60:
+            raise HTTPException(status_code=400, detail="Duration must be between 15 and 60 seconds")
+        duration = body.duration
 
     params = {
-        "topic": body.topic.strip(),
+        "topic": topic,
         "style": body.style,
         "narration_style": body.narration_style or "",
         "voice_id": body.voice_id or user.get("default_voice_id"),
-        "duration": body.duration,
+        "duration": duration,
         "platform": body.platform,
         "privacy": body.privacy,
+        "input_mode": input_mode,
+        "source_text": source_text if input_mode == "text" else None,
         "status": "pending",
         "progress": 0,
         "current_step": "Queued...",

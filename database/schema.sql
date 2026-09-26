@@ -46,7 +46,9 @@ create table if not exists jobs (
   -- Input parameters
   topic           text not null,
   style           text not null default 'educational',
-  narration_style text,                        -- e.g. "David Attenborough", "energetic"
+  narration_style text,                        -- preset key or free text
+  input_mode      text not null default 'idea', -- 'idea' | 'text'
+  source_text     text,                        -- verbatim narration when input_mode = 'text'
   voice_id        text,                        -- ElevenLabs voice ID
   duration        int  not null default 45,
   platform        text[] default array['youtube'],  -- ['youtube', 'instagram']

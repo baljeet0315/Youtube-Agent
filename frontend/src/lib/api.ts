@@ -19,7 +19,9 @@ export default api;
 // ── Job types ──────────────────────────────────────────────────
 
 export interface CreateJobParams {
+  input_mode?: "idea" | "text";
   topic: string;
+  source_text?: string;
   style: string;
   narration_style?: string;
   voice_id?: string;

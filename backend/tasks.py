@@ -56,20 +56,26 @@ def generate_video_task(self, job_id: str, user_id: str, params: dict):
         from video_creator import create_video as assemble_video
         import agent_config
 
-        topic = params["topic"]
+        topic = params.get("topic", "")
         style = params.get("style", "educational")
         narration_style = params.get("narration_style", "")
         voice_id = params.get("voice_id", agent_config.ELEVENLABS_VOICE_ID)
         duration = params.get("duration", 45)
+        input_mode = params.get("input_mode", "idea")
+        source_text = params.get("source_text") or ""
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # ── Step 1: Generate Script ──────────────────────────
-            set_progress(job_id, user_id, 10, "Generating script...")
+            set_progress(job_id, user_id, 10,
+                         "Building script around your text..." if input_mode == "text"
+                         else "Generating script...")
             script = generate_script(
                 topic,
                 style=style,
                 duration_seconds=duration,
                 narration_style=narration_style,
+                input_mode=input_mode,
+                source_text=source_text,
             )
             update_job(job_id, {"script": script})
             log_action(user_id, "script_generated", job_id=job_id,

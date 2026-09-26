@@ -1,122 +1,344 @@
 """
 script_generator.py — Generate YouTube Shorts scripts using Claude
+
+Two input modes:
+  idea  — user gives a topic; Claude writes the narration.
+  text  — user pastes their own paragraph; it is used VERBATIM as the narration
+          and Claude builds title / tags / scenes / visual prompts around it.
+
+Output follows scene schema v2 (see PHASE2_PLAN.md §1) and stays backward
+compatible with the v1 assembler: every scene still has `timestamp`,
+`duration`, `caption`, `visual_query`.
 """
 import json
+import re
 import anthropic
 import agent_config as config
 
+MODEL = "claude-opus-4-6"
 
-def generate_script(topic: str, style: str = "educational", duration_seconds: int = 45,
-                     narration_style: str = "") -> dict:
+# Speaking pace used for all length math. ~150 wpm.
+WORDS_PER_SECOND = 2.5
+MAX_SHORT_SECONDS = 60
+MAX_WORDS = int(MAX_SHORT_SECONDS * WORDS_PER_SECOND)  # 150
+
+# ── Narration presets ────────────────────────────────────────────────────────
+# Frontend offers these as chips; the chip fills the narration_style text box
+# with the key. Free text is also accepted and used as-is.
+
+NARRATION_PRESETS = {
+    "documentary": (
+        "A nature-documentary narrator: calm, precise, observational. Speaks slowly, "
+        "lets facts land, never hypes. Occasional dry wonder."
+    ),
+    "storyteller": (
+        "A fireside storyteller: warm, intimate, second-person when it helps. Builds "
+        "tension sentence by sentence and pays it off at the end."
+    ),
+    "energetic": (
+        "A fast, punchy YouTube host: short sentences, direct address, playful "
+        "confidence. Every line earns the next second of attention. No shouting, no cringe."
+    ),
+    "philosopher": (
+        "A calm philosopher thinking out loud: unhurried, curious, concrete images over "
+        "abstractions. Ends on a question that lingers rather than a lesson."
+    ),
+    "news": (
+        "A sharp news explainer: clear, neutral, specific. Leads with the most surprising "
+        "fact, gives context in plain language, closes with why it matters."
+    ),
+}
+
+CONTENT_STYLE_HINTS = {
+    "educational": "Teach one thing clearly. Lead with the surprising part, then the why.",
+    "motivational": "Earn the emotion with specifics, not slogans. One honest turn, no clichés.",
+    "storytelling": "One character, one moment, one change. Show, don't summarize.",
+    "story": "One character, one moment, one change. Show, don't summarize.",
+    "news": "Most important fact first. Plain language. Say why it matters.",
+    "philosophical": "Start from something ordinary and make it strange. End open.",
+}
+
+BANNED_PHRASES = [
+    "in conclusion", "today we explore", "today we're going to", "let's dive in",
+    "did you know", "welcome back", "in this video", "without further ado",
+    "at the end of the day", "it's important to note", "game-changer", "unlock",
+]
+
+
+# ── Validation helpers ───────────────────────────────────────────────────────
+
+def estimate_seconds(text: str) -> float:
+    return len(text.split()) / WORDS_PER_SECOND
+
+
+def validate_source_text(text: str) -> dict:
     """
-    Generate a structured script for a YouTube Short.
-
-    Args:
-        topic: The video topic or idea (e.g. "why cats purr")
-        style: One of 'educational', 'motivational', 'story', 'news'
-        duration_seconds: Target video length (30–60 seconds recommended)
-        narration_style: Optional free-text override for narration tone/voice
-            (e.g. "David Attenborough", "energetic host"). If empty, falls
-            back to the default Attenborough/Nolan-inspired tone.
-
-    Returns:
-        dict with keys: title, description, tags, narration, scenes, hook
+    Check pasted text against the Shorts limit.
+    Returns {ok, words, est_seconds, max_words, message}.
+    Used by both the API (reject early) and the generator.
     """
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    words = len(text.split())
+    est = words / WORDS_PER_SECOND
+    if words == 0:
+        return {"ok": False, "words": 0, "est_seconds": 0, "max_words": MAX_WORDS,
+                "message": "Paste the text you want narrated."}
+    if words > MAX_WORDS:
+        return {
+            "ok": False, "words": words, "est_seconds": round(est), "max_words": MAX_WORDS,
+            "message": (
+                f"That's about {round(est)} seconds at speaking pace — Shorts max is "
+                f"{MAX_SHORT_SECONDS}s. Trim to roughly {MAX_WORDS} words "
+                f"(you're {words - MAX_WORDS} over)."
+            ),
+        }
+    return {"ok": True, "words": words, "est_seconds": round(est), "max_words": MAX_WORDS,
+            "message": f"About {round(est)} seconds."}
 
-    word_target = int(duration_seconds * 2.5)  # ~150 words/min speaking pace
 
-    if narration_style:
-        system_prompt = f"""You are a writer who creates short-form video narration in this style: {narration_style}.
-Stay fully in that voice and tone throughout.
-Always output valid JSON — no extra text outside the JSON block."""
+# ── Prompt pieces ────────────────────────────────────────────────────────────
 
-        tone_rules = f"""Tone and style rules — follow these strictly:
-- Narrate in the following style/voice: {narration_style}
-- Write for the spoken word — short sentences, natural rhythm, easy to read aloud
-- No corporate language, no YouTube filler, no "in conclusion", no "today we explore" """
-    else:
-        system_prompt = """You are a writer in the tradition of David Attenborough — calm, wise, observational.
-You watch humanity from a great distance, with neither judgment nor comfort.
-You tell stories the way Christopher Nolan makes films: layered, atmospheric, non-linear if it serves the idea.
-You never explain. You never resolve. You provoke.
-You speak in images, not arguments. In questions, not answers.
-Always output valid JSON — no extra text outside the JSON block."""
+def _resolve_narration_style(narration_style: str) -> str:
+    key = (narration_style or "").strip().lower()
+    if not key:
+        return NARRATION_PRESETS["documentary"]
+    return NARRATION_PRESETS.get(key, narration_style.strip())
 
-        tone_rules = """Tone and style rules — follow these strictly:
-- Narrate like David Attenborough observing a strange species called humans
-- Build like a Nolan film: open on something specific and concrete, spiral inward, end on an open question with no answer
-- Do NOT explain the idea. Do NOT offer solutions or comfort. Do NOT moralize.
-- Every sentence should make the viewer feel something they cannot name
-- The final line must be a question — haunting, open, unresolvable
-- Write for silence. Short sentences. Pauses. Weight.
-- No corporate language, no YouTube filler, no "in conclusion", no "today we explore" """
 
-    user_prompt = f"""Write a YouTube Shorts narration about this idea: "{topic}"
-
-Target duration: {duration_seconds} seconds (~{word_target} spoken words)
-
-{tone_rules}
-
-Return a JSON object with exactly these fields:
+def _schema_block(narration_instruction: str, word_target: int) -> str:
+    return f"""Return ONE JSON object with exactly these fields and nothing else:
 {{
-  "title": "Intriguing YouTube title — attention-grabbing, matches the narration tone (max 60 chars)",
-  "description": "2–3 sentences in the same tone as the narration + relevant hashtags",
-  "tags": ["tag1", "tag2", ...],
-  "hook": "The opening line — must grab attention immediately",
-  "narration": "Full narration. No scene directions. Just the spoken words. Target {word_target} words.{' Must end with an unanswered question.' if not narration_style else ''}",
+  "version": 2,
+  "title": "YouTube title. Specific and curiosity-driven, matches the tone. Max 60 chars. No clickbait words like SHOCKING.",
+  "description": "2–3 sentences in the same voice, then 3–5 relevant hashtags on a new line.",
+  "tags": ["8–12 short lowercase tags, no # symbol"],
+  "hook": "The first sentence of the narration, copied exactly.",
+  "narration": "{narration_instruction}",
+  "music_mood": "one of: calm, mysterious, tense, uplifting, energetic, none",
+  "style_guide": {{
+    "visual_style": "One line describing the look for ALL images: medium (photoreal / painterly / 3D), palette, lighting, lens, grain. Cinematic 9:16.",
+    "subject_consistency": "If a person, animal or object recurs across scenes, describe it once in concrete visual terms (age, build, clothing, colour, species). Otherwise null.",
+    "negative_prompt": "text, watermark, logo, caption, extra fingers, deformed, blurry, low quality"
+  }},
   "scenes": [
     {{
-      "timestamp": 0,
-      "duration": 5,
-      "caption": "3–5 words max. Atmospheric, not explanatory.",
-      "visual_query": "Concrete Pexels search query (2-4 words, searchable)"
+      "id": 1,
+      "narration_excerpt": "The exact sentence(s) from `narration` this scene plays under. Must be a verbatim substring. Scenes must cover the whole narration in order with no overlap.",
+      "duration_hint": 5,
+      "caption": "3–5 word title-card text, or null. Not a subtitle — a mood line.",
+      "visual_prompt": "A standalone image prompt (25–50 words): subject, setting, action, lighting, camera angle, mood. If subject_consistency is set and the subject appears, repeat that wording exactly. No text or letters in the image.",
+      "motion": "one of: zoom_in, zoom_out, pan_left, pan_right, static",
+      "visual_query": "2–4 word stock-footage search fallback, concrete (e.g. 'rain on window night')"
     }}
   ]
 }}
 
-Important:
-- The hook must be the first sentence of the narration
-- Create 5–8 scenes covering the full duration
-- visual_query should be cinematic and concrete (e.g. "lone figure foggy road", not "loneliness")
-- captions should feel like film title cards — sparse, weighted
-"""
+Scene rules:
+- 5–8 scenes. Every scene 3–8 seconds. Cut on sentence boundaries.
+- Vary shot scale: mix wide, medium, close-up. Vary motion. Never two identical prompts.
+- visual_prompt describes what the camera SEES, not the idea. "Empty playground at dusk, single swing moving" not "loneliness".
+- Target narration length: ~{word_target} words."""
 
-    message = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=1500,
-        messages=[{"role": "user", "content": user_prompt}],
-        system=system_prompt,
-    )
 
-    raw = message.content[0].text.strip()
+def _idea_prompt(topic: str, style: str, narration_desc: str, duration: int) -> tuple[str, str]:
+    word_target = int(duration * WORDS_PER_SECOND)
+    hard_max = min(int(word_target * 1.15), MAX_WORDS)
+    style_hint = CONTENT_STYLE_HINTS.get(style.lower(), CONTENT_STYLE_HINTS["educational"])
+    banned = ", ".join(BANNED_PHRASES)
+    schema = _schema_block("Full spoken narration only. No stage directions, no speaker labels.", word_target)
 
-    # Strip markdown code fences if present
+    system = f"""You write narration for vertical short-form video (YouTube Shorts).
+Voice: {narration_desc}
+You always answer with valid JSON only — no prose, no markdown fences."""
+
+    user = f"""Write a {duration}-second Short about: "{topic}"
+
+Content style: {style_hint}
+
+Writing rules — these decide whether the video gets watched:
+- HOOK: the first sentence must be under 12 words and contain something specific and surprising — a number, a contradiction, an image, a claim the viewer wants to check. No greetings, no questions like "have you ever wondered".
+- ONE idea. If you feel a second idea coming, cut it.
+- Concrete over abstract. Nouns you can picture. Numbers where true. Sensory details.
+- Spoken rhythm: mostly short sentences, one longer one for breath. Read it aloud in your head.
+- No filler. Never use: {banned}.
+- The last line must land — a turn, a callback to the hook, or a question that stays. Not a summary, not a call to action.
+- Length: about {word_target} words. Hard maximum {hard_max}.
+
+{schema}"""
+    return system, user
+
+
+def _text_prompt(source_text: str, style: str, narration_desc: str) -> tuple[str, str]:
+    words = len(source_text.split())
+    style_hint = CONTENT_STYLE_HINTS.get(style.lower(), CONTENT_STYLE_HINTS["storytelling"])
+    schema = _schema_block("The provided narration, copied EXACTLY. Do not change a single word.", words)
+
+    system = f"""You are a film editor turning a given passage into a vertical short-form video.
+The narration is FIXED — the user wrote it. You do not rewrite, trim, or improve it.
+Delivery voice (for title/description tone only): {narration_desc}
+You always answer with valid JSON only — no prose, no markdown fences."""
+
+    user = f"""Here is the narration, exactly as it will be spoken ({words} words):
+
+<narration>
+{source_text}
+</narration>
+
+Your job: build the video around it.
+- Copy the narration into the "narration" field EXACTLY, character for character.
+- Break it into scenes on sentence boundaries; each scene's narration_excerpt must be a verbatim substring, in order, covering all of it.
+- Write visual prompts that illustrate what each passage evokes — literal when the text is concrete, atmospheric when it is abstract.
+- Content style for framing: {style_hint}
+
+{schema}"""
+    return system, user
+
+
+# ── Post-processing ──────────────────────────────────────────────────────────
+
+def _parse_json(raw: str) -> dict:
+    raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
     raw = raw.strip()
+    # Tolerate stray text before/after the object
+    start, end = raw.find("{"), raw.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError("Model did not return a JSON object")
+    return json.loads(raw[start:end + 1])
 
-    script = json.loads(raw)
 
-    # Validate required keys
-    required = ["title", "description", "tags", "hook", "narration", "scenes"]
+def _normalize(script: dict, narration_override: str | None, duration_hint_total: int) -> dict:
+    """Validate, enforce verbatim narration in text mode, add v1-compat fields."""
+    required = ["title", "description", "tags", "narration", "scenes"]
     for key in required:
         if key not in script:
             raise ValueError(f"Script missing required key: '{key}'")
 
-    print(f"\n✅ Script generated: \"{script['title']}\"")
-    print(f"   Narration length: {len(script['narration'].split())} words")
-    print(f"   Scenes: {len(script['scenes'])}")
+    script["version"] = 2
+
+    if narration_override is not None:
+        script["narration"] = narration_override  # guarantee verbatim
+
+    narration = script["narration"].strip()
+    script["narration"] = narration
+
+    # Hook = first sentence, always derived so it can't drift
+    first = re.split(r"(?<=[.!?])\s+", narration, maxsplit=1)[0]
+    script["hook"] = first.strip()
+
+    script.setdefault("music_mood", "calm")
+    if script["music_mood"] not in {"calm", "mysterious", "tense", "uplifting", "energetic", "none"}:
+        script["music_mood"] = "calm"
+
+    sg = script.get("style_guide") or {}
+    sg.setdefault("visual_style", "cinematic photoreal, soft natural light, shallow depth of field, subtle film grain")
+    sg.setdefault("subject_consistency", None)
+    sg.setdefault("negative_prompt", "text, watermark, logo, caption, extra fingers, deformed, blurry, low quality")
+    script["style_guide"] = sg
+
+    scenes = script["scenes"]
+    if not isinstance(scenes, list) or not scenes:
+        raise ValueError("Script has no scenes")
+
+    # Tags: clean
+    script["tags"] = [str(t).lstrip("#").strip().lower() for t in script.get("tags", []) if str(t).strip()][:15]
+
+    # Scenes: fill defaults + v1 compat (timestamp/duration)
+    total_hint = 0
+    for i, s in enumerate(scenes, start=1):
+        s["id"] = i
+        s.setdefault("narration_excerpt", "")
+        s["duration_hint"] = max(3, min(8, int(s.get("duration_hint") or s.get("duration") or 5)))
+        s.setdefault("caption", None)
+        s.setdefault("visual_prompt", s.get("visual_query", ""))
+        s.setdefault("visual_query", " ".join(str(s.get("visual_prompt", "")).split()[:4]))
+        if s.get("motion") not in {"zoom_in", "zoom_out", "pan_left", "pan_right", "static"}:
+            s["motion"] = "zoom_in" if i % 2 else "pan_right"
+        if s["narration_excerpt"] and s["narration_excerpt"] not in narration:
+            # Keep going, but flag it so the assembler falls back to proportional timing
+            s["excerpt_verified"] = False
+        else:
+            s["excerpt_verified"] = bool(s["narration_excerpt"])
+        total_hint += s["duration_hint"]
+
+    # v1 compat: timestamp + duration scaled to the intended length
+    t = 0.0
+    for s in scenes:
+        dur = round(s["duration_hint"] / total_hint * duration_hint_total, 2)
+        s["timestamp"] = round(t, 2)
+        s["duration"] = dur
+        t += dur
 
     return script
 
 
+# ── Public API ───────────────────────────────────────────────────────────────
+
+def generate_script(
+    topic: str = "",
+    style: str = "educational",
+    duration_seconds: int = 45,
+    narration_style: str = "",
+    input_mode: str = "idea",
+    source_text: str = "",
+) -> dict:
+    """
+    Generate a structured Shorts script (schema v2, v1-compatible).
+
+    input_mode="idea": `topic` is a subject; Claude writes narration of ~duration_seconds.
+    input_mode="text": `source_text` is used verbatim as narration (≤150 words); `topic`
+                       is optional context. Raises ValueError if over the 60 s limit.
+    """
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    narration_desc = _resolve_narration_style(narration_style)
+
+    if input_mode == "text":
+        check = validate_source_text(source_text)
+        if not check["ok"]:
+            raise ValueError(check["message"])
+        system, user = _text_prompt(source_text.strip(), style, narration_desc)
+        narration_override = source_text.strip()
+        intended_seconds = max(15, check["est_seconds"])
+    else:
+        if not topic.strip():
+            raise ValueError("Topic is required in idea mode")
+        duration_seconds = max(15, min(MAX_SHORT_SECONDS, int(duration_seconds)))
+        system, user = _idea_prompt(topic.strip(), style, narration_desc, duration_seconds)
+        narration_override = None
+        intended_seconds = duration_seconds
+
+    message = client.messages.create(
+        model=MODEL,
+        max_tokens=2500,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+    )
+    script = _parse_json(message.content[0].text)
+    script = _normalize(script, narration_override, intended_seconds)
+
+    # Idea mode: enforce the hard cap even if the model overshoots
+    if input_mode == "idea":
+        wc = len(script["narration"].split())
+        if wc > MAX_WORDS:
+            raise ValueError(f"Generated narration is {wc} words (> {MAX_WORDS}). Retry with a shorter duration.")
+
+    script["input_mode"] = input_mode
+    script["narration_style"] = narration_style or "documentary"
+
+    print(f"\n✅ Script generated: \"{script['title']}\"")
+    print(f"   Mode: {input_mode} · {len(script['narration'].split())} words · "
+          f"{len(script['scenes'])} scenes · music: {script['music_mood']}")
+    return script
+
+
 if __name__ == "__main__":
-    # Quick test
     import sys
-    topic = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "The science of why we dream"
     config.validate_config()
-    result = generate_script(topic, style="educational", duration_seconds=45)
+    if len(sys.argv) > 2 and sys.argv[1] == "--text":
+        result = generate_script(input_mode="text", source_text=" ".join(sys.argv[2:]))
+    else:
+        topic = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "The science of why we dream"
+        result = generate_script(topic, style="educational", duration_seconds=45)
     print(json.dumps(result, indent=2))

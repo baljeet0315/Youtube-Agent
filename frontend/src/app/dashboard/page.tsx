@@ -20,11 +20,27 @@ const PRIVACIES = [
   { value: "public", label: "Public", desc: "Visible to everyone" },
 ];
 
+// Mirrors NARRATION_PRESETS in script_generator.py (keys must match)
+const NARRATION_PRESETS = [
+  { key: "documentary", label: "Documentary", desc: "Calm, precise, observational" },
+  { key: "storyteller", label: "Storyteller", desc: "Warm, builds tension, pays off" },
+  { key: "energetic", label: "Energetic host", desc: "Fast, punchy, direct" },
+  { key: "philosopher", label: "Philosopher", desc: "Unhurried, ends on a question" },
+  { key: "news", label: "News explainer", desc: "Fact first, plain language" },
+];
+
+// Must match script_generator.py: 2.5 words/s, 60 s max → 150 words
+const WORDS_PER_SECOND = 2.5;
+const MAX_SECONDS = 60;
+const MAX_WORDS = MAX_SECONDS * WORDS_PER_SECOND;
+
 export default function CreatePage() {
   const router = useRouter();
   const { getToken } = useAuth();
 
+  const [inputMode, setInputMode] = useState<"idea" | "text">("idea");
   const [topic, setTopic] = useState("");
+  const [sourceText, setSourceText] = useState("");
   const [narrationStyle, setNarrationStyle] = useState("");
   const [style, setStyle] = useState("Educational");
   const [voiceId, setVoiceId] = useState(VOICES[0].id);
@@ -53,9 +69,21 @@ export default function CreatePage() {
     );
   };
 
+  // Live length check for pasted text
+  const sourceWords = sourceText.trim() ? sourceText.trim().split(/\s+/).length : 0;
+  const sourceSeconds = Math.round(sourceWords / WORDS_PER_SECOND);
+  const sourceTooLong = sourceWords > MAX_WORDS;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!topic.trim()) { setError("Please enter a topic."); return; }
+    if (inputMode === "idea" && !topic.trim()) { setError("Please enter a topic."); return; }
+    if (inputMode === "text") {
+      if (!sourceText.trim()) { setError("Paste the text you want narrated."); return; }
+      if (sourceTooLong) {
+        setError(`That's about ${sourceSeconds}s at speaking pace — Shorts max is ${MAX_SECONDS}s. Trim to roughly ${MAX_WORDS} words (you're ${sourceWords - MAX_WORDS} over).`);
+        return;
+      }
+    }
     if (platforms.length === 0) { setError("Select at least one platform."); return; }
 
     setLoading(true);
@@ -70,7 +98,9 @@ export default function CreatePage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
+          input_mode: inputMode,
           topic: topic.trim(),
+          source_text: inputMode === "text" ? sourceText.trim() : undefined,
           style: style.toLowerCase(),
           narration_style: narrationStyle.trim(),
           voice_id: voiceId,
@@ -81,7 +111,12 @@ export default function CreatePage() {
         }),
       });
 
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        // FastAPI returns {"detail": "..."} — surface the message, not raw JSON
+        let msg = await res.text();
+        try { msg = JSON.parse(msg).detail || msg; } catch {}
+        throw new Error(msg);
+      }
       const data = await res.json();
       router.push(`/dashboard/jobs/${data.job_id}`);
     } catch (err: any) {
@@ -99,26 +134,108 @@ export default function CreatePage() {
 
       <form onSubmit={handleSubmit} className="space-y-5">
 
-        {/* Topic */}
+        {/* Input */}
         <Section title="Your idea">
-          <label className="field-label">Topic or idea</label>
-          <textarea
-            rows={3}
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            placeholder="e.g. Why do humans laugh? The psychology behind it..."
-            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 outline-none transition"
-          />
+          {/* Mode toggle */}
+          <div className="inline-flex rounded-xl border border-gray-200 p-1 mb-4 bg-gray-50">
+            {([
+              { key: "idea", label: "Give me an idea" },
+              { key: "text", label: "Use my own text" },
+            ] as const).map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => { setInputMode(m.key); setError(""); }}
+                className={clsx(
+                  "px-4 py-1.5 rounded-lg text-sm transition",
+                  inputMode === m.key
+                    ? "bg-white text-gray-900 shadow-sm font-medium"
+                    : "text-gray-500 hover:text-gray-700"
+                )}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {inputMode === "idea" ? (
+            <>
+              <label className="field-label">Topic or idea</label>
+              <textarea
+                rows={3}
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="e.g. Why do humans laugh? The psychology behind it..."
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 outline-none transition"
+              />
+            </>
+          ) : (
+            <>
+              <label className="field-label">Your narration (used word for word)</label>
+              <textarea
+                rows={7}
+                value={sourceText}
+                onChange={(e) => setSourceText(e.target.value)}
+                placeholder="Paste a paragraph, a passage from your story, a quote... It will be spoken exactly as written."
+                className={clsx(
+                  "w-full border rounded-xl px-4 py-3 text-sm resize-y outline-none transition focus:ring-2",
+                  sourceTooLong
+                    ? "border-red-300 focus:border-red-400 focus:ring-red-100"
+                    : "border-gray-200 focus:border-brand-500 focus:ring-brand-100"
+                )}
+              />
+              <div className={clsx("flex justify-between text-xs mt-1.5", sourceTooLong ? "text-red-500" : "text-gray-400")}>
+                <span>
+                  {sourceWords} / {MAX_WORDS} words · ~{sourceSeconds}s
+                </span>
+                {sourceTooLong && (
+                  <span className="font-medium">
+                    Too long for a Short — trim {sourceWords - MAX_WORDS} words
+                  </span>
+                )}
+              </div>
+              <label className="field-label mt-4">Title hint <span className="text-gray-300 font-normal normal-case tracking-normal">(optional)</span></label>
+              <input
+                type="text"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="What is this about? Helps with the title and visuals."
+                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition"
+              />
+            </>
+          )}
 
           <label className="field-label mt-4">Narration style</label>
+          <div className="flex flex-wrap gap-2 mb-2">
+            {NARRATION_PRESETS.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                title={p.desc}
+                onClick={() => setNarrationStyle(narrationStyle === p.key ? "" : p.key)}
+                className={clsx(
+                  "px-3 py-1.5 rounded-full text-sm border transition",
+                  narrationStyle === p.key
+                    ? "bg-brand-50 text-brand-600 border-brand-200 font-medium"
+                    : "border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <input
             type="text"
             value={narrationStyle}
             onChange={(e) => setNarrationStyle(e.target.value)}
-            placeholder='e.g. "David Attenborough", "energetic podcast host", "calm philosopher"'
+            placeholder='…or describe one: "tired detective", "excited science teacher", "whispered bedtime story"'
             className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition"
           />
-          <p className="text-xs text-gray-400 mt-1.5">Describe any style — the AI will match it</p>
+          <p className="text-xs text-gray-400 mt-1.5">
+            {inputMode === "text"
+              ? "In text mode this only shapes the title and description — your words are never changed."
+              : "Pick a preset or describe any voice. Leave empty for Documentary."}
+          </p>
 
           <label className="field-label mt-4">Content style</label>
           <div className="flex flex-wrap gap-2">
@@ -189,17 +306,28 @@ export default function CreatePage() {
 
         {/* Settings */}
         <Section title="Video settings">
-          <label className="field-label">Duration — {duration}s</label>
-          <input
-            type="range"
-            min={15} max={60} step={5}
-            value={duration}
-            onChange={(e) => setDuration(Number(e.target.value))}
-            className="w-full accent-brand-500"
-          />
-          <div className="flex justify-between text-xs text-gray-400 mt-1">
-            <span>15s</span><span>60s</span>
-          </div>
+          {inputMode === "idea" ? (
+            <>
+              <label className="field-label">Duration — {duration}s</label>
+              <input
+                type="range"
+                min={15} max={60} step={5}
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                className="w-full accent-brand-500"
+              />
+              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                <span>15s</span><span>60s</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <label className="field-label">Duration</label>
+              <p className="text-sm text-gray-600">
+                ~{sourceSeconds || 0}s — set by your text length
+              </p>
+            </>
+          )}
 
           <label className="field-label mt-4">Publish to</label>
           <div className="flex gap-3">
