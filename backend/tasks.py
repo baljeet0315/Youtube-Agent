@@ -68,6 +68,7 @@ def generate_script_task(self, job_id: str, user_id: str, params: dict):
             narration_style=params.get("narration_style", ""),
             input_mode=input_mode,
             source_text=params.get("source_text") or "",
+            language=params.get("language") or "auto",
         )
 
         update_job(job_id, {

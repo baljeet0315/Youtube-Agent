@@ -99,6 +99,7 @@ class CreateJobRequest(BaseModel):
     source_text: Optional[str] = None       # used verbatim when input_mode == "text"
     auto_render: bool = False               # skip the script review gate (scheduled runs)
     visual_mode: Optional[str] = None       # "ai_images" | "stock" (default from user/env)
+    language: str = "auto"                  # idea mode: narration language ("auto" = match request)
     tts_model: Optional[str] = None         # ElevenLabs model id (default from env)
     voice_settings: Optional[dict] = None   # {stability, similarity_boost, style, speed}
 
@@ -200,6 +201,7 @@ async def create_job_endpoint(
         "privacy": body.privacy,
         "input_mode": input_mode,
         "source_text": source_text if input_mode == "text" else None,
+        "language": (body.language or "auto").strip().lower()[:8],
         "auto_render": bool(body.auto_render),
         "visual_mode": (body.visual_mode if body.visual_mode in ("ai_images", "stock")
                         else user.get("default_visual_mode") or os.getenv("DEFAULT_VISUAL_MODE", "ai_images")),

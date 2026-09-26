@@ -49,6 +49,7 @@ create table if not exists jobs (
   narration_style text,                        -- preset key or free text
   input_mode      text not null default 'idea', -- 'idea' | 'text'
   source_text     text,                        -- verbatim narration when input_mode = 'text'
+  language        text not null default 'auto', -- idea mode narration language; 'auto' = match request
   voice_id        text,                        -- ElevenLabs voice ID
   tts_model       text,                        -- ElevenLabs model id (null = env default)
   voice_settings  jsonb,                       -- {stability, similarity_boost, style, speed}

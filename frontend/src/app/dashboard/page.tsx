@@ -38,6 +38,24 @@ const NARRATION_PRESETS = [
   { key: "news", label: "News explainer", desc: "Fact first, plain language" },
 ];
 
+// Mirrors LANGUAGES in script_generator.py
+const LANGUAGES = [
+  { code: "auto", label: "Auto (match my request)" },
+  { code: "en", label: "English" },
+  { code: "pa", label: "ਪੰਜਾਬੀ · Punjabi" },
+  { code: "hi", label: "हिन्दी · Hindi" },
+  { code: "ur", label: "اردو · Urdu" },
+  { code: "es", label: "Español" },
+  { code: "fr", label: "Français" },
+  { code: "de", label: "Deutsch" },
+  { code: "pt", label: "Português" },
+  { code: "ar", label: "العربية · Arabic" },
+  { code: "bn", label: "বাংলা · Bengali" },
+  { code: "ta", label: "தமிழ் · Tamil" },
+  { code: "te", label: "తెలుగు · Telugu" },
+  { code: "gu", label: "ગુજરાતી · Gujarati" },
+];
+
 // Must match script_generator.py: 2.5 words/s, 60 s max → 150 words
 const WORDS_PER_SECOND = 2.5;
 const MAX_SECONDS = 60;
@@ -49,6 +67,7 @@ export default function CreatePage() {
 
   const [inputMode, setInputMode] = useState<"idea" | "text">("idea");
   const [topic, setTopic] = useState("");
+  const [language, setLanguage] = useState("auto");
   const [sourceText, setSourceText] = useState("");
   const [narrationStyle, setNarrationStyle] = useState("");
   const [style, setStyle] = useState("Educational");
@@ -158,6 +177,7 @@ export default function CreatePage() {
           input_mode: inputMode,
           topic: topic.trim(),
           source_text: inputMode === "text" ? sourceText.trim() : undefined,
+          language: inputMode === "idea" ? language : "auto",
           style: style.toLowerCase(),
           narration_style: narrationStyle.trim(),
           voice_id: effectiveVoiceId,
@@ -228,6 +248,17 @@ export default function CreatePage() {
                 placeholder='Just ask — e.g. "create me a script for why sports is important for a child"'
                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 outline-none transition"
               />
+              <label className="field-label mt-4">Script language</label>
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 bg-white"
+              >
+                {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+              </select>
+              <p className="text-xs text-gray-400 mt-1.5">
+                Narration, title and captions come out in this language. Pick a voice and speech model that support it (Eleven v3 for Punjabi).
+              </p>
             </>
           ) : (
             <>

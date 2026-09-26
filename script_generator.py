@@ -147,15 +147,37 @@ Scene rules:
 - Target narration length: ~{word_target} words."""
 
 
-def _idea_prompt(topic: str, style: str, narration_desc: str, duration: int) -> tuple[str, str]:
+LANGUAGES = {
+    "auto": "the same language the request is written in",
+    "en": "English",
+    "pa": "Punjabi (Gurmukhi script)",
+    "hi": "Hindi (Devanagari script)",
+    "ur": "Urdu",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "pt": "Portuguese",
+    "ar": "Arabic",
+    "bn": "Bengali",
+    "ta": "Tamil",
+    "te": "Telugu",
+    "gu": "Gujarati",
+}
+
+
+def _idea_prompt(topic: str, style: str, narration_desc: str, duration: int,
+                 language: str = "auto") -> tuple[str, str]:
     word_target = int(duration * WORDS_PER_SECOND)
     hard_max = min(int(word_target * 1.15), MAX_WORDS)
     style_hint = CONTENT_STYLE_HINTS.get(style.lower(), CONTENT_STYLE_HINTS["educational"])
     banned = ", ".join(BANNED_PHRASES)
     schema = _schema_block("Full spoken narration only. No stage directions, no speaker labels.", word_target)
+    lang_desc = LANGUAGES.get(language or "auto", LANGUAGES["auto"])
 
     system = f"""You write narration for vertical short-form video (YouTube Shorts).
 Voice: {narration_desc}
+LANGUAGE: write the narration, title, description and tags in {lang_desc}. Use that language's
+native script. Visual prompts are ALWAYS in English regardless (the image model only reads English).
 You always answer with valid JSON only — no prose, no markdown fences."""
 
     user = f"""The user asked for a {duration}-second Short. Their request, in their own words:
@@ -346,6 +368,7 @@ def generate_script(
     narration_style: str = "",
     input_mode: str = "idea",
     source_text: str = "",
+    language: str = "auto",
 ) -> dict:
     """
     Generate a structured Shorts script (schema v2, v1-compatible).
@@ -368,7 +391,7 @@ def generate_script(
         if not topic.strip():
             raise ValueError("Topic is required in idea mode")
         duration_seconds = max(15, min(MAX_SHORT_SECONDS, int(duration_seconds)))
-        system, user = _idea_prompt(topic.strip(), style, narration_desc, duration_seconds)
+        system, user = _idea_prompt(topic.strip(), style, narration_desc, duration_seconds, language)
         narration_override = None
         intended_seconds = duration_seconds
 
@@ -385,6 +408,7 @@ def generate_script(
     script["narration_style"] = narration_style or "documentary"
     script["style"] = style
     script["intended_seconds"] = intended_seconds
+    script["language"] = language or "auto"
 
     print(f"\n✅ Script generated: \"{script['title']}\"")
     print(f"   Mode: {input_mode} · {len(script['narration'].split())} words · "
@@ -471,9 +495,12 @@ def regenerate_script(script: dict, feedback: str) -> dict:
     else:
         narration_override = None
         schema = _schema_block("Full spoken narration only. No stage directions.", word_target)
+        lang = script.get("language") or "auto"
+        lang_desc = LANGUAGES.get(lang, LANGUAGES["auto"]) if lang != "auto" else "the same language as the current narration"
         lock_rule = (f"You may rewrite anything, including the narration. Keep it about {word_target} words "
                      f"(hard max {min(int(word_target * 1.15), MAX_WORDS)}). Keep the hook rules: first sentence "
-                     f"under 12 words, specific and surprising. Never use: {banned}.")
+                     f"under 12 words, specific and surprising. Never use: {banned}. "
+                     f"Narration, title, description and tags stay in {lang_desc}; visual prompts in English.")
 
     prev_json = json.dumps(prev, ensure_ascii=False, indent=1)
 
@@ -505,7 +532,7 @@ for; keep what it doesn't mention unless it must change to stay coherent. {lock_
         raise ValueError("Revised narration is too long for a Short — ask for something shorter.")
 
     # Carry job-level metadata forward
-    for k in ("input_mode", "narration_style", "style", "intended_seconds"):
+    for k in ("input_mode", "narration_style", "style", "intended_seconds", "language"):
         if k in script:
             new[k] = script[k]
     new["regenerated_from_feedback"] = feedback
