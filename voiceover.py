@@ -56,6 +56,101 @@ def generate_voiceover(text: str, output_filename: str = "voiceover.mp3") -> str
     return output_path
 
 
+DEFAULT_VOICE_SETTINGS = {
+    "stability": 0.5,
+    "similarity_boost": 0.75,
+    "style": 0.3,
+    "use_speaker_boost": True,
+}
+
+
+def _alignment_to_words(alignment: dict) -> list:
+    """
+    ElevenLabs returns character-level alignment:
+      {"characters": [...], "character_start_times_seconds": [...], "character_end_times_seconds": [...]}
+    Group consecutive non-whitespace characters into words with start/end.
+    """
+    chars = alignment.get("characters") or []
+    starts = alignment.get("character_start_times_seconds") or []
+    ends = alignment.get("character_end_times_seconds") or []
+    words, buf, w_start, w_end = [], [], None, None
+    for ch, s, e in zip(chars, starts, ends):
+        if ch.isspace():
+            if buf:
+                words.append({"text": "".join(buf), "start": float(w_start), "end": float(w_end)})
+                buf, w_start = [], None
+            continue
+        if w_start is None:
+            w_start = s
+        w_end = e
+        buf.append(ch)
+    if buf:
+        words.append({"text": "".join(buf), "start": float(w_start), "end": float(w_end)})
+    return words
+
+
+def generate_voiceover_with_timestamps(text: str, output_filename: str = "voiceover.mp3",
+                                       voice_id: str = None, voice_settings: dict = None) -> tuple:
+    """
+    TTS + per-word timestamps via /with-timestamps.
+    Returns (mp3_path, words) where words = [{text, start, end}, ...].
+    Falls back to plain TTS with words=[] if the timestamps endpoint fails.
+    Also writes <output_filename>.words.json next to the mp3.
+    """
+    import json, base64
+
+    voice_id = voice_id or config.ELEVENLABS_VOICE_ID
+    settings = dict(DEFAULT_VOICE_SETTINGS, **(voice_settings or {}))
+    output_path = os.path.join(config.OUTPUT_DIR, "audio", output_filename)
+    words_path = output_path + ".words.json"
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
+    headers = {"Content-Type": "application/json", "xi-api-key": config.ELEVENLABS_API_KEY}
+    payload = {"text": text, "model_id": "eleven_turbo_v2", "voice_settings": settings}
+
+    print(f"\n🎙️  Generating voiceover with timestamps ({len(text.split())} words, voice {voice_id})...")
+    words = []
+    try:
+        r = requests.post(url, json=payload, headers=headers, timeout=90)
+        if r.status_code != 200:
+            raise RuntimeError(f"{r.status_code}: {r.text[:200]}")
+        data = r.json()
+        audio_b64 = data.get("audio_base64") or data.get("audio")
+        if not audio_b64:
+            raise RuntimeError("no audio_base64 in response")
+        with open(output_path, "wb") as f:
+            f.write(base64.b64decode(audio_b64))
+        alignment = data.get("normalized_alignment") or data.get("alignment") or {}
+        words = _alignment_to_words(alignment)
+        if not words:
+            print("   ⚠️  Timestamps response had no alignment — captions will use estimated timing")
+    except Exception as e:
+        print(f"   ⚠️  with-timestamps failed ({e}); falling back to plain TTS")
+        original = config.ELEVENLABS_VOICE_ID
+        config.ELEVENLABS_VOICE_ID = voice_id
+        try:
+            generate_voiceover(text, output_filename=output_filename)
+        finally:
+            config.ELEVENLABS_VOICE_ID = original
+        words = []
+
+    with open(words_path, "w") as f:
+        json.dump(words, f)
+
+    size_kb = os.path.getsize(output_path) / 1024
+    print(f"✅ Voiceover saved: {output_path} ({size_kb:.1f} KB, {len(words)} timed words)")
+    return output_path, words
+
+
+def estimate_words(text: str, total_duration: float) -> list:
+    """Even-spaced fallback timings when real alignment is unavailable."""
+    toks = text.split()
+    if not toks:
+        return []
+    per = total_duration / len(toks)
+    return [{"text": t, "start": i * per, "end": (i + 1) * per} for i, t in enumerate(toks)]
+
+
 def get_audio_duration(audio_path: str) -> float:
     """
     Get the duration of an audio file in seconds.

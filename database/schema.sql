@@ -55,6 +55,7 @@ create table if not exists jobs (
   privacy         text default 'private',
 
   auto_render     boolean not null default false,   -- skip script review (scheduled runs)
+  visual_mode     text not null default 'ai_images', -- 'ai_images' | 'stock'
 
   -- Status tracking
   status          text not null default 'pending',

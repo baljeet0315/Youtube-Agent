@@ -44,6 +44,7 @@ export default function CreatePage() {
   const [narrationStyle, setNarrationStyle] = useState("");
   const [style, setStyle] = useState("Educational");
   const [voiceId, setVoiceId] = useState(VOICES[0].id);
+  const [visualMode, setVisualMode] = useState<"ai_images" | "stock">("ai_images");
   const [duration, setDuration] = useState(45);
   const [platforms, setPlatforms] = useState<string[]>(["youtube"]);
   const [privacy, setPrivacy] = useState("private");
@@ -104,6 +105,7 @@ export default function CreatePage() {
           style: style.toLowerCase(),
           narration_style: narrationStyle.trim(),
           voice_id: voiceId,
+          visual_mode: visualMode,
           duration,
           platform: platforms,
           privacy,
@@ -306,6 +308,27 @@ export default function CreatePage() {
 
         {/* Settings */}
         <Section title="Video settings">
+          <label className="field-label">Visuals</label>
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            {([
+              { key: "ai_images", label: "AI images", desc: "Generated per scene, animated. Matches the script." },
+              { key: "stock", label: "Stock footage", desc: "Pexels clips by keyword. Free, generic." },
+            ] as const).map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => setVisualMode(m.key)}
+                className={clsx(
+                  "text-left px-4 py-3 rounded-xl border transition",
+                  visualMode === m.key ? "border-brand-300 bg-brand-50" : "border-gray-200 hover:border-gray-300"
+                )}
+              >
+                <p className={clsx("text-sm font-medium", visualMode === m.key ? "text-brand-700" : "text-gray-800")}>{m.label}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{m.desc}</p>
+              </button>
+            ))}
+          </div>
+
           {inputMode === "idea" ? (
             <>
               <label className="field-label">Duration — {duration}s</label>

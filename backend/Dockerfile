@@ -42,7 +42,10 @@ COPY backend/ /app/
 
 # Copy agent pipeline modules into /agent (config.py renamed to avoid
 # clashing with backend's config.py)
-COPY script_generator.py voiceover.py video_creator.py youtube_uploader.py /agent/
+COPY script_generator.py voiceover.py video_creator.py youtube_uploader.py \
+     visuals.py captions.py music.py /agent/
 COPY config.py /agent/agent_config.py
+# Optional bundled music: assets/music/<mood>/*.mp3 (R2 music/<mood>/ also works)
+COPY assets/ /agent/assets/
 
 CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -98,6 +98,7 @@ class CreateJobRequest(BaseModel):
     input_mode: str = "idea"                # "idea" | "text"
     source_text: Optional[str] = None       # used verbatim when input_mode == "text"
     auto_render: bool = False               # skip the script review gate (scheduled runs)
+    visual_mode: Optional[str] = None       # "ai_images" | "stock" (default from user/env)
 
 
 def _script_helpers():
@@ -168,6 +169,8 @@ async def create_job_endpoint(
         "input_mode": input_mode,
         "source_text": source_text if input_mode == "text" else None,
         "auto_render": bool(body.auto_render),
+        "visual_mode": (body.visual_mode if body.visual_mode in ("ai_images", "stock")
+                        else user.get("default_visual_mode") or os.getenv("DEFAULT_VISUAL_MODE", "ai_images")),
         "status": "pending",
         "progress": 0,
         "current_step": "Queued...",
@@ -312,6 +315,8 @@ async def approve_job(
         raise HTTPException(status_code=404, detail="Job not found")
     if job["user_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Access denied")
+    if job["status"] in ("uploading", "done"):
+        return {"success": True, "message": "Already uploaded", "status": job["status"]}
     if job["status"] != "preview_ready":
         raise HTTPException(status_code=400,
                             detail=f"Job is not ready for approval (status: {job['status']})")

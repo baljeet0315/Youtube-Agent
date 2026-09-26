@@ -1,6 +1,9 @@
 # Phase 2 Plan — Script-driven, AI-generated visuals
 
-Status: DRAFT (Sept 2026). Current pipeline works end-to-end for multiple users.
+Status (26 Sep 2026): Phase 1 shipped (P1.1–P1.4; P1.5 voices pending).
+Phase 2 code complete and offline-tested (visuals.py, captions.py, music.py,
+video_creator.py rewrite, timestamps). Needs: FAL_KEY on Railway, p2 migration,
+music tracks, live test. Current pipeline works end-to-end for multiple users.
 This plan upgrades output quality. Architecture stays: FastAPI + Celery worker on
 Railway, Next.js on Vercel, Supabase, R2. Each "agent" below is a Python module
 called by the same Celery task — no new services.

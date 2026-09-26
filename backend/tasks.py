@@ -131,35 +131,70 @@ def render_video_task(self, job_id: str, user_id: str):
         from video_creator import create_video as assemble_video
         import agent_config
 
+        from voiceover import generate_voiceover_with_timestamps
+
         job = get_job(job_id)
         if not job or not job.get("script"):
             raise ValueError("Job has no script to render")
         script = job["script"]
         voice_id = job.get("voice_id") or agent_config.ELEVENLABS_VOICE_ID
+        visual_mode = job.get("visual_mode") or agent_config.DEFAULT_VISUAL_MODE
+        use_ai_images = visual_mode == "ai_images" and bool(agent_config.FAL_KEY)
+        if visual_mode == "ai_images" and not agent_config.FAL_KEY:
+            print("⚠️  visual_mode=ai_images but FAL_KEY not set — using stock footage")
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # ── Step 2: Voiceover ────────────────────────────────
+            # ── Step 2: Voiceover (+ word timestamps) ────────────
             set_progress(job_id, user_id, 40, "Generating voiceover...", status="rendering")
-            audio_path = os.path.join(tmpdir, "voice.mp3")
-
-            # Temporarily override voice ID if user selected one
-            original_voice = agent_config.ELEVENLABS_VOICE_ID
-            agent_config.ELEVENLABS_VOICE_ID = voice_id
-            generate_voiceover(script["narration"], output_filename="voice.mp3")
-            agent_config.ELEVENLABS_VOICE_ID = original_voice
-
-            # The voiceover module saves to OUTPUT_DIR/audio/
+            audio_filename = f"{job_id}.mp3"
+            src_audio, words = generate_voiceover_with_timestamps(
+                script["narration"], output_filename=audio_filename, voice_id=voice_id)
             import shutil
-            src_audio = os.path.join(agent_config.OUTPUT_DIR, "audio", "voice.mp3")
+            audio_path = os.path.join(tmpdir, "voice.mp3")
             shutil.copy(src_audio, audio_path)
-            log_action(user_id, "voiceover_generated", job_id=job_id)
+            log_action(user_id, "voiceover_generated", job_id=job_id,
+                       metadata={"timed_words": len(words)})
 
-            # ── Step 3 + 4: Footage + Assembly ──────────────────
-            set_progress(job_id, user_id, 55, "Fetching footage and assembling video...")
+            # ── Step 3: Visuals ──────────────────────────────────
+            images = {}
+            if use_ai_images:
+                from visuals import generate_scene_images
+                n = len(script.get("scenes", []))
+                set_progress(job_id, user_id, 50, f"Generating {n} scene images...")
+                images = generate_scene_images(
+                    script, job_id,
+                    progress=lambda i, n: set_progress(job_id, user_id, 50 + int(20 * i / n),
+                                                       f"Generating scene images ({i}/{n})..."))
+                log_action(user_id, "images_generated", job_id=job_id,
+                           metadata={"ok": sum(1 for v in images.values() if v), "total": n})
+            else:
+                set_progress(job_id, user_id, 55, "Fetching stock footage...")
+
+            # ── Step 3b: Music ───────────────────────────────────
+            music_path = None
+            try:
+                from music import pick_track
+                music_path = pick_track(script.get("music_mood", "calm"))
+            except Exception as e:
+                print(f"⚠️  music selection failed: {e}")
+
+            # ── Step 4: Assembly ─────────────────────────────────
+            set_progress(job_id, user_id, 72, "Assembling video (motion, captions, music)...")
             video_filename = f"{job_id}.mp4"
-            assemble_video(script, audio_path, output_filename=video_filename)
+            assemble_video(script, audio_path, output_filename=video_filename,
+                           words=words, images=images, music_path=music_path)
             local_video_path = os.path.join(agent_config.OUTPUT_DIR, "videos", video_filename)
-            log_action(user_id, "video_assembled", job_id=job_id)
+            log_action(user_id, "video_assembled", job_id=job_id,
+                       metadata={"visual_mode": "ai_images" if use_ai_images else "stock",
+                                 "music": bool(music_path)})
+
+            # Free disk on the worker
+            try:
+                shutil.rmtree(os.path.join(agent_config.OUTPUT_DIR, "images", job_id), ignore_errors=True)
+                os.remove(src_audio)
+                os.remove(src_audio + ".words.json")
+            except Exception:
+                pass
 
             # ── Step 5: Upload to R2 ─────────────────────────────
             set_progress(job_id, user_id, 80, "Uploading preview to cloud...")
