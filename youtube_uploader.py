@@ -275,7 +275,10 @@ def upload_video_with_token(video_path: str, script: dict, token_json: str,
             error = None
 
     video_id = response.get("id", "")
-    url = f"https://www.youtube.com/watch?v={video_id}"
+    # Shorts are auto-classified by YouTube (vertical + <3 min). The /shorts/ URL
+    # opens in the Shorts player when it qualifies, and falls back to the normal
+    # player if not — so it's the right link to hand back either way.
+    url = f"https://www.youtube.com/shorts/{video_id}"
     print(f"✅ YouTube upload complete: {url}")
     return url
 

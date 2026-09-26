@@ -229,14 +229,20 @@ def create_video(script: dict, audio_path: str, output_filename: str = "final_vi
     if not scenes:
         raise ValueError("Script has no scenes defined")
 
-    # Distribute duration across scenes
+    # Closure: hold the last scene for a moment after the voice ends, then fade.
+    tail = float(getattr(config, "TAIL_SECONDS", 2.0))
+    fade = min(1.0, tail)
+    total_duration = audio_duration + tail
+
+    # Distribute the SPOKEN part across scenes; the last scene also gets the tail
     total_scene_declared = sum(s.get("duration", 5) for s in scenes)
     scene_clips = []
 
     for i, scene in enumerate(scenes):
         declared = scene.get("duration", 5)
-        # Scale scene durations proportionally to match audio
         scene_dur = (declared / total_scene_declared) * audio_duration
+        if i == len(scenes) - 1:
+            scene_dur += tail
         scene_dur = round(scene_dur, 2)
 
         print(f"   Scene {i+1}/{len(scenes)}: '{scene.get('visual_query', '')}' ({scene_dur:.1f}s)")
@@ -247,19 +253,22 @@ def create_video(script: dict, audio_path: str, output_filename: str = "final_vi
     print("   Concatenating scenes...")
     video = concatenate_videoclips(scene_clips, method="compose")
 
-    # Attach voiceover audio
+    # Attach voiceover audio (shorter than video → silence over the tail)
     audio = AudioFileClip(audio_path)
 
-    # Trim/pad video to match audio
-    if video.duration > audio_duration:
-        video = video.subclip(0, audio_duration)
-    elif video.duration < audio_duration:
+    # Trim/pad video to the intended total length
+    if video.duration > total_duration:
+        video = video.subclip(0, total_duration)
+    elif video.duration < total_duration:
         pad = ColorClip(
             size=(config.VIDEO_WIDTH, config.VIDEO_HEIGHT),
             color=(20, 30, 60),
-            duration=audio_duration - video.duration,
+            duration=total_duration - video.duration,
         ).set_fps(config.VIDEO_FPS)
         video = concatenate_videoclips([video, pad], method="compose")
+
+    if fade > 0:
+        video = video.fadeout(fade)
 
     final = video.set_audio(audio)
 

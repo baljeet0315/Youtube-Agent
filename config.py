@@ -17,6 +17,7 @@ YOUTUBE_CLIENT_SECRETS_FILE = os.getenv("YOUTUBE_CLIENT_SECRETS_FILE", "client_s
 VIDEO_WIDTH = int(os.getenv("VIDEO_WIDTH", 720))
 VIDEO_HEIGHT = int(os.getenv("VIDEO_HEIGHT", 1280))
 VIDEO_FPS = int(os.getenv("VIDEO_FPS", 30))
+TAIL_SECONDS = float(os.getenv("TAIL_SECONDS", 2.0))   # hold + fade after voice ends
 MAX_VIDEO_DURATION = int(os.getenv("MAX_VIDEO_DURATION", 60))
 
 # ── Paths ─────────────────────────────────────────────────
