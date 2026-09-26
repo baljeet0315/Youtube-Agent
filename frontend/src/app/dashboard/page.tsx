@@ -139,7 +139,7 @@ export default function CreatePage() {
         {/* Input */}
         <Section title="Your idea">
           {/* Mode toggle */}
-          <div className="inline-flex rounded-xl border border-gray-200 p-1 mb-4 bg-gray-50">
+          <div className="flex w-full sm:w-auto sm:inline-flex rounded-xl border border-gray-200 p-1 mb-4 bg-gray-50">
             {([
               { key: "idea", label: "Give me an idea" },
               { key: "text", label: "Use my own text" },
@@ -149,7 +149,7 @@ export default function CreatePage() {
                 type="button"
                 onClick={() => { setInputMode(m.key); setError(""); }}
                 className={clsx(
-                  "px-4 py-1.5 rounded-lg text-sm transition",
+                  "flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm transition whitespace-nowrap",
                   inputMode === m.key
                     ? "bg-white text-gray-900 shadow-sm font-medium"
                     : "text-gray-500 hover:text-gray-700"
