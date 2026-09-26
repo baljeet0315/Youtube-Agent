@@ -4,7 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import {
   CheckCircle, XCircle, Youtube, ExternalLink, ThumbsUp, RotateCcw,
-  Sparkles, Clapperboard, Music, Pencil, Save, MessageSquare, Film,
+  Sparkles, Clapperboard, Music, Pencil, Save, MessageSquare, Film, ChevronDown, ChevronUp,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -39,6 +39,7 @@ export default function JobPage() {
   const [draft, setDraft] = useState<any>(null);
   const [dirty, setDirty] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [showScenes, setShowScenes] = useState(false);
   const draftForScript = useRef<string>("");
 
   const api = async (path: string, init: RequestInit = {}) => {
@@ -223,16 +224,17 @@ export default function JobPage() {
       {/* ── Script Review ─────────────────────────────────────── */}
       {isScriptReady && (
         <div className="space-y-5 mb-5">
-          <div className="bg-white rounded-2xl border border-gray-100 p-6">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6">
             <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-medium uppercase tracking-widest text-gray-400 flex items-center gap-2">
-                <Pencil size={13} /> Script — review before rendering
+              <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <Pencil size={14} className="text-gray-400" /> Here's your script
               </p>
               <span className="text-xs text-gray-400">
-                {words} words · ~{Math.round(words / WORDS_PER_SECOND)}s
+                ~{Math.round(words / WORDS_PER_SECOND)}s
                 {job.regeneration_count > 0 && ` · rewrite ${job.regeneration_count}`}
               </span>
             </div>
+            <p className="text-xs text-gray-400 -mt-2 mb-4">Read it aloud in your head. Edit anything directly, or tell it what to change below.</p>
 
             <label className="field-label">Title</label>
             <input
@@ -257,8 +259,53 @@ export default function JobPage() {
               )}
             />
             {tooLong && <p className="text-xs text-red-500 mt-1">Over {MAX_WORDS} words — too long for a Short.</p>}
+          </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+          {/* Feedback → regenerate (primary way to change things) */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6">
+            <p className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-2">
+              <MessageSquare size={14} className="text-gray-400" /> Want it different?
+            </p>
+            <p className="text-xs text-gray-400 mb-3">Say it like you'd tell a writer. It'll rewrite in about 20 seconds.</p>
+            <textarea
+              rows={2}
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              placeholder={textMode
+                ? '"make the visuals darker", "shorter scenes", "different title"'
+                : '"too formal — make it punchier", "open with the statistic", "aim it at parents"'}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-base sm:text-sm resize-y outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+            />
+            <button
+              onClick={handleRegenerate}
+              disabled={!!busy || feedback.trim().length < 3}
+              className="mt-3 flex items-center gap-2 border border-gray-200 hover:bg-gray-50 text-gray-800 px-4 py-2.5 rounded-xl text-sm font-medium transition disabled:opacity-40"
+            >
+              {busy === "regen" ? <span className="animate-spin rounded-full h-4 w-4 border-2 border-gray-800 border-t-transparent" /> : <Sparkles size={15} />}
+              Rewrite it
+            </button>
+            {job.feedback_history?.length > 0 && (
+              <div className="mt-4 space-y-1">
+                {job.feedback_history.map((h: any, i: number) => (
+                  <p key={i} className="text-xs text-gray-400">↳ {h.feedback}</p>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Scenes + mood (advanced, collapsed) */}
+          <button
+            type="button"
+            onClick={() => setShowScenes(!showScenes)}
+            className="w-full flex items-center justify-between px-5 py-3.5 rounded-2xl border border-dashed border-gray-200 text-sm text-gray-500 hover:text-gray-800 hover:border-gray-300 transition bg-white/60"
+          >
+            <span className="flex items-center gap-2"><Clapperboard size={15} /> Scenes & visuals ({draft.scenes.length} scenes · {draft.music_mood} music)</span>
+            {showScenes ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+
+          {showScenes && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
               <div>
                 <label className="field-label flex items-center gap-1"><Music size={12} /> Music mood</label>
                 <div className="flex flex-wrap gap-1.5">
@@ -279,13 +326,6 @@ export default function JobPage() {
                 )}
               </div>
             </div>
-          </div>
-
-          {/* Scenes */}
-          <div className="bg-white rounded-2xl border border-gray-100 p-6">
-            <p className="text-xs font-medium uppercase tracking-widest text-gray-400 mb-4 flex items-center gap-2">
-              <Clapperboard size={13} /> Scenes ({draft.scenes.length})
-            </p>
             <div className="space-y-4">
               {draft.scenes.map((s: any) => (
                 <div key={s.id} className="border border-gray-100 rounded-xl p-4">
@@ -324,45 +364,15 @@ export default function JobPage() {
               ))}
             </div>
           </div>
-
-          {/* Feedback → regenerate */}
-          <div className="bg-white rounded-2xl border border-gray-100 p-6">
-            <p className="text-xs font-medium uppercase tracking-widest text-gray-400 mb-3 flex items-center gap-2">
-              <MessageSquare size={13} /> Not quite right? Tell it what to change
-            </p>
-            <textarea
-              rows={2}
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              placeholder={textMode
-                ? 'e.g. "make the visuals darker and more literal", "shorter scenes", "different title"'
-                : 'e.g. "too formal — make it punchier", "open with the statistic", "aim it at parents, not kids"'}
-              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-y outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-            />
-            <button
-              onClick={handleRegenerate}
-              disabled={!!busy || feedback.trim().length < 3}
-              className="mt-3 flex items-center gap-2 border border-gray-200 hover:bg-gray-50 text-gray-800 px-4 py-2.5 rounded-xl text-sm font-medium transition disabled:opacity-50"
-            >
-              {busy === "regen" ? <span className="animate-spin rounded-full h-4 w-4 border-2 border-gray-800 border-t-transparent" /> : <Sparkles size={15} />}
-              Rewrite script
-            </button>
-            {job.feedback_history?.length > 0 && (
-              <div className="mt-4 space-y-1">
-                {job.feedback_history.map((h: any, i: number) => (
-                  <p key={i} className="text-xs text-gray-400">↳ {h.feedback}</p>
-                ))}
-              </div>
-            )}
-          </div>
+          )}
 
           {/* Actions */}
-          <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-col sm:flex-row gap-3 pt-1">
             {dirty && (
               <button
                 onClick={() => run("save", saveEdits)}
                 disabled={!!busy || tooLong}
-                className="flex items-center justify-center gap-2 border border-gray-200 hover:bg-gray-50 text-gray-800 py-3.5 px-5 rounded-xl font-medium text-sm transition disabled:opacity-50"
+                className="flex items-center justify-center gap-2 border border-gray-200 hover:bg-gray-50 text-gray-800 py-4 px-5 rounded-2xl font-medium text-sm transition disabled:opacity-50"
               >
                 {busy === "save" ? <span className="animate-spin rounded-full h-4 w-4 border-2 border-gray-800 border-t-transparent" /> : <Save size={16} />}
                 Save edits
@@ -371,12 +381,13 @@ export default function JobPage() {
             <button
               onClick={handleRender}
               disabled={!!busy || tooLong}
-              className="flex-1 flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white py-3.5 rounded-xl font-medium text-sm transition disabled:opacity-60"
+              className="flex-1 flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 active:scale-[0.99] text-white py-4 rounded-2xl font-medium text-base transition disabled:opacity-60 shadow-lg shadow-gray-900/10"
             >
-              {busy === "render" ? <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" /> : <Film size={16} />}
-              {dirty ? "Save and render video" : "Looks good — render video"}
+              {busy === "render" ? <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" /> : <Film size={18} />}
+              {dirty ? "Save & make the video" : "Looks good — make the video"}
             </button>
           </div>
+          <p className="text-xs text-gray-400 text-center">Takes 2–3 minutes. You'll preview it before it goes to YouTube.</p>
         </div>
       )}
 
@@ -424,7 +435,7 @@ export default function JobPage() {
             className="flex-1 flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white py-3.5 rounded-xl font-medium text-sm transition disabled:opacity-60"
           >
             {busy === "approve" ? <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" /> : <ThumbsUp size={16} />}
-            {busy === "approve" ? "Uploading..." : `Approve and upload to ${job.platform?.join(" + ")}`}
+            {busy === "approve" ? "Uploading…" : "Looks good — post to YouTube"}
           </button>
         </div>
       )}
