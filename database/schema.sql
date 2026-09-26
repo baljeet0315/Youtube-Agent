@@ -50,6 +50,8 @@ create table if not exists jobs (
   input_mode      text not null default 'idea', -- 'idea' | 'text'
   source_text     text,                        -- verbatim narration when input_mode = 'text'
   voice_id        text,                        -- ElevenLabs voice ID
+  tts_model       text,                        -- ElevenLabs model id (null = env default)
+  voice_settings  jsonb,                       -- {stability, similarity_boost, style, speed}
   duration        int  not null default 45,
   platform        text[] default array['youtube'],  -- ['youtube', 'instagram']
   privacy         text default 'private',

@@ -89,8 +89,18 @@ def _alignment_to_words(alignment: dict) -> list:
     return words
 
 
+TTS_MODELS = {
+    # id: (label, notes)
+    "eleven_multilingual_v2": ("Multilingual v2", "29 languages, most stable. No Punjabi."),
+    "eleven_v3": ("Eleven v3", "70+ languages incl. Punjabi. Most expressive, newest."),
+    "eleven_turbo_v2_5": ("Turbo v2.5", "Fast, 32 languages incl. Hindi. No Punjabi."),
+    "eleven_turbo_v2": ("Turbo v2 (English only)", "Fastest. English only."),
+}
+
+
 def generate_voiceover_with_timestamps(text: str, output_filename: str = "voiceover.mp3",
-                                       voice_id: str = None, voice_settings: dict = None) -> tuple:
+                                       voice_id: str = None, voice_settings: dict = None,
+                                       model_id: str = None) -> tuple:
     """
     TTS + per-word timestamps via /with-timestamps.
     Returns (mp3_path, words) where words = [{text, start, end}, ...].
@@ -100,17 +110,27 @@ def generate_voiceover_with_timestamps(text: str, output_filename: str = "voiceo
     import json, base64
 
     voice_id = voice_id or config.ELEVENLABS_VOICE_ID
-    settings = dict(DEFAULT_VOICE_SETTINGS, **(voice_settings or {}))
+    model_id = model_id or getattr(config, "ELEVENLABS_MODEL", "eleven_multilingual_v2")
+    # Only keep known keys, clamp to 0..1
+    clean = {}
+    for k in ("stability", "similarity_boost", "style"):
+        v = (voice_settings or {}).get(k)
+        if isinstance(v, (int, float)):
+            clean[k] = max(0.0, min(1.0, float(v)))
+    settings = dict(DEFAULT_VOICE_SETTINGS, **clean)
+    if "speed" in (voice_settings or {}):
+        try:
+            settings["speed"] = max(0.7, min(1.2, float(voice_settings["speed"])))
+        except Exception:
+            pass
     output_path = os.path.join(config.OUTPUT_DIR, "audio", output_filename)
     words_path = output_path + ".words.json"
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
     headers = {"Content-Type": "application/json", "xi-api-key": config.ELEVENLABS_API_KEY}
-    payload = {"text": text,
-               "model_id": getattr(config, "ELEVENLABS_MODEL", "eleven_multilingual_v2"),
-               "voice_settings": settings}
+    payload = {"text": text, "model_id": model_id, "voice_settings": settings}
 
-    print(f"\n🎙️  Generating voiceover with timestamps ({len(text.split())} words, voice {voice_id})...")
+    print(f"\n🎙️  Voiceover: {len(text.split())} words · voice {voice_id} · model {model_id} · {settings}")
     words = []
     try:
         r = requests.post(url, json=payload, headers=headers, timeout=90)
@@ -128,12 +148,14 @@ def generate_voiceover_with_timestamps(text: str, output_filename: str = "voiceo
             print("   ⚠️  Timestamps response had no alignment — captions will use estimated timing")
     except Exception as e:
         print(f"   ⚠️  with-timestamps failed ({e}); falling back to plain TTS")
-        original = config.ELEVENLABS_VOICE_ID
+        original_voice, original_model = config.ELEVENLABS_VOICE_ID, getattr(config, "ELEVENLABS_MODEL", None)
         config.ELEVENLABS_VOICE_ID = voice_id
+        config.ELEVENLABS_MODEL = model_id
         try:
             generate_voiceover(text, output_filename=output_filename)
         finally:
-            config.ELEVENLABS_VOICE_ID = original
+            config.ELEVENLABS_VOICE_ID = original_voice
+            config.ELEVENLABS_MODEL = original_model
         words = []
 
     with open(words_path, "w") as f:
@@ -178,8 +200,22 @@ def list_voices() -> list:
     headers = {"xi-api-key": config.ELEVENLABS_API_KEY}
     response = requests.get(url, headers=headers, timeout=15)
     response.raise_for_status()
-    voices = response.json().get("voices", [])
-    return [{"voice_id": v["voice_id"], "name": v["name"]} for v in voices]
+    out = []
+    for v in response.json().get("voices", []):
+        labels = v.get("labels") or {}
+        out.append({
+            "voice_id": v["voice_id"],
+            "name": v["name"],
+            "category": v.get("category", ""),          # premade | cloned | generated | professional
+            "accent": labels.get("accent", ""),
+            "language": labels.get("language", ""),
+            "gender": labels.get("gender", ""),
+            "age": labels.get("age", ""),
+            "use_case": labels.get("use case") or labels.get("use_case", ""),
+            "description": labels.get("description", ""),
+            "preview_url": v.get("preview_url", ""),
+        })
+    return out
 
 
 if __name__ == "__main__":

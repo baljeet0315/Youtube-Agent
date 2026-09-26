@@ -1,18 +1,27 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, Mic, Youtube, Instagram, ChevronRight, X } from "lucide-react";
+import { Sparkles, Youtube, Instagram, X, Play, Square, SlidersHorizontal, Search } from "lucide-react";
 import { useAuth } from "@clerk/nextjs";
 import clsx from "clsx";
 
 const STYLES = ["Educational", "Motivational", "Storytelling", "News", "Philosophical"];
 
-const VOICES = [
-  { id: "pNInz6obpgDQGcFmaJgB", name: "Adam", desc: "Deep · Neutral · Male" },
-  { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", desc: "British · Calm · Male" },
-  { id: "EXAVITQu4vr4xnSDxMaL", name: "Bella", desc: "Warm · Conversational · Female" },
-  { id: "VR6AewLTigWG4xSOukaG", name: "Arnold", desc: "Strong · Authoritative · Male" },
+// Shown until /voices loads (and as fallback if it fails)
+const FALLBACK_VOICES: Voice[] = [
+  { voice_id: "pNInz6obpgDQGcFmaJgB", name: "Adam", accent: "american", gender: "male", description: "deep", language: "", category: "premade", preview_url: "" },
+  { voice_id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", accent: "british", gender: "male", description: "calm", language: "", category: "premade", preview_url: "" },
+  { voice_id: "EXAVITQu4vr4xnSDxMaL", name: "Bella", accent: "american", gender: "female", description: "warm", language: "", category: "premade", preview_url: "" },
 ];
+
+type Voice = {
+  voice_id: string; name: string; category?: string; accent?: string; language?: string;
+  gender?: string; age?: string; use_case?: string; description?: string; preview_url?: string;
+};
+type TtsModel = { id: string; label: string; notes: string };
+type VoiceSettings = { stability: number; similarity_boost: number; style: number; speed: number };
+
+const DEFAULT_SETTINGS: VoiceSettings = { stability: 0.5, similarity_boost: 0.75, style: 0.3, speed: 1.0 };
 
 const PRIVACIES = [
   { value: "private", label: "Private", desc: "Review before publishing" },
@@ -43,7 +52,54 @@ export default function CreatePage() {
   const [sourceText, setSourceText] = useState("");
   const [narrationStyle, setNarrationStyle] = useState("");
   const [style, setStyle] = useState("Educational");
-  const [voiceId, setVoiceId] = useState(VOICES[0].id);
+  // Voice
+  const [voices, setVoices] = useState<Voice[]>(FALLBACK_VOICES);
+  const [models, setModels] = useState<TtsModel[]>([]);
+  const [voiceId, setVoiceId] = useState(FALLBACK_VOICES[0].voice_id);
+  const [customVoice, setCustomVoice] = useState("");
+  const [voiceSearch, setVoiceSearch] = useState("");
+  const [ttsModel, setTtsModel] = useState("");
+  const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(DEFAULT_SETTINGS);
+  const [showTuning, setShowTuning] = useState(false);
+  const [playing, setPlaying] = useState<string>("");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = await getToken({ template: "Youtube-agent-emailID" });
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/voices`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.voices?.length) setVoices(data.voices);
+        setModels(data.models || []);
+        setTtsModel(data.default_model || "");
+        if (data.default_settings) setVoiceSettings({ ...DEFAULT_SETTINGS, ...data.default_settings });
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const filteredVoices = useMemo(() => {
+    const q = voiceSearch.trim().toLowerCase();
+    if (!q) return voices;
+    return voices.filter((v) =>
+      [v.name, v.accent, v.language, v.gender, v.age, v.use_case, v.description, v.category]
+        .filter(Boolean).join(" ").toLowerCase().includes(q));
+  }, [voices, voiceSearch]);
+
+  const togglePreview = (v: Voice) => {
+    if (!v.preview_url) return;
+    if (playing === v.voice_id) { audioRef.current?.pause(); setPlaying(""); return; }
+    if (!audioRef.current) audioRef.current = new Audio();
+    audioRef.current.src = v.preview_url;
+    audioRef.current.onended = () => setPlaying("");
+    audioRef.current.play().catch(() => {});
+    setPlaying(v.voice_id);
+  };
+
+  const effectiveVoiceId = customVoice.trim() || voiceId;
+
   const [visualMode, setVisualMode] = useState<"ai_images" | "stock">("ai_images");
   const [duration, setDuration] = useState(45);
   const [platforms, setPlatforms] = useState<string[]>(["youtube"]);
@@ -104,7 +160,9 @@ export default function CreatePage() {
           source_text: inputMode === "text" ? sourceText.trim() : undefined,
           style: style.toLowerCase(),
           narration_style: narrationStyle.trim(),
-          voice_id: voiceId,
+          voice_id: effectiveVoiceId,
+          tts_model: ttsModel || undefined,
+          voice_settings: voiceSettings,
           visual_mode: visualMode,
           duration,
           platform: platforms,
@@ -282,28 +340,145 @@ export default function CreatePage() {
 
         {/* Voice */}
         <Section title="Voice">
-          <div className="space-y-2">
-            {VOICES.map((v) => (
-              <button
-                key={v.id}
-                type="button"
-                onClick={() => setVoiceId(v.id)}
-                className={clsx(
-                  "w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition",
-                  voiceId === v.id
-                    ? "border-brand-300 bg-brand-50"
-                    : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                )}
-              >
-                <Mic size={16} className={voiceId === v.id ? "text-brand-500" : "text-gray-400"} />
-                <div className="flex-1">
-                  <p className={clsx("text-sm font-medium", voiceId === v.id ? "text-brand-700" : "text-gray-800")}>{v.name}</p>
-                  <p className="text-xs text-gray-400">{v.desc}</p>
-                </div>
-                {voiceId === v.id && <div className="w-2 h-2 rounded-full bg-brand-500" />}
-              </button>
-            ))}
+          {/* Search */}
+          <div className="relative mb-3">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={voiceSearch}
+              onChange={(e) => setVoiceSearch(e.target.value)}
+              placeholder="Search voices — try “indian”, “hindi”, “female”, “calm”"
+              className="w-full border border-gray-200 rounded-xl pl-9 pr-4 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+            />
           </div>
+
+          {/* Voice list */}
+          <div className={clsx("space-y-1.5 overflow-y-auto pr-1", filteredVoices.length > 5 && "max-h-72")}>
+            {filteredVoices.length === 0 && (
+              <p className="text-sm text-gray-400 py-3">No match. Add voices to “My Voices” in ElevenLabs and they’ll show up here.</p>
+            )}
+            {filteredVoices.map((v) => {
+              const active = !customVoice.trim() && voiceId === v.voice_id;
+              const meta = [v.accent, v.language, v.gender, v.age, v.description || v.use_case].filter(Boolean).join(" · ");
+              return (
+                <div
+                  key={v.voice_id}
+                  role="button"
+                  onClick={() => { setVoiceId(v.voice_id); setCustomVoice(""); }}
+                  className={clsx(
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition cursor-pointer",
+                    active ? "border-brand-300 bg-brand-50" : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); togglePreview(v); }}
+                    disabled={!v.preview_url}
+                    title={v.preview_url ? "Preview" : "No preview"}
+                    className={clsx("w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition",
+                      v.preview_url ? "bg-gray-900 text-white hover:bg-gray-700" : "bg-gray-100 text-gray-300")}
+                  >
+                    {playing === v.voice_id ? <Square size={12} /> : <Play size={12} className="ml-0.5" />}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className={clsx("text-sm font-medium truncate", active ? "text-brand-700" : "text-gray-800")}>
+                      {v.name}
+                      {v.category && v.category !== "premade" && (
+                        <span className="ml-2 text-[10px] uppercase tracking-wider text-gray-400">{v.category}</span>
+                      )}
+                    </p>
+                    <p className="text-xs text-gray-400 truncate">{meta || "—"}</p>
+                  </div>
+                  {active && <div className="w-2 h-2 rounded-full bg-brand-500 shrink-0" />}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Custom ID */}
+          <label className="field-label mt-4">Or paste any ElevenLabs voice ID</label>
+          <input
+            type="text"
+            value={customVoice}
+            onChange={(e) => setCustomVoice(e.target.value)}
+            placeholder="e.g. 21m00Tcm4TlvDq8ikWAM"
+            className={clsx("w-full border rounded-xl px-4 py-2.5 text-sm font-mono outline-none focus:ring-2",
+              customVoice.trim() ? "border-brand-300 bg-brand-50 focus:ring-brand-100" : "border-gray-200 focus:border-brand-500 focus:ring-brand-100")}
+          />
+          <p className="text-xs text-gray-400 mt-1.5">
+            For Punjabi / Hindi: open the ElevenLabs Voice Library, search the language, click “Add to My Voices” — it appears in the list above.
+          </p>
+
+          {/* Model + tuning */}
+          <button
+            type="button"
+            onClick={() => setShowTuning(!showTuning)}
+            className="mt-4 flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+          >
+            <SlidersHorizontal size={14} /> {showTuning ? "Hide" : "Show"} model & delivery settings
+          </button>
+
+          {showTuning && (
+            <div className="mt-3 space-y-4 border-t border-gray-100 pt-4">
+              {models.length > 0 && (
+                <div>
+                  <label className="field-label">Speech model</label>
+                  <div className="space-y-1.5">
+                    {models.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setTtsModel(m.id)}
+                        className={clsx("w-full text-left px-3 py-2 rounded-lg border text-sm transition",
+                          ttsModel === m.id ? "border-brand-300 bg-brand-50 text-brand-700" : "border-gray-200 text-gray-700 hover:border-gray-300")}
+                      >
+                        <span className="font-medium">{m.label}</span>
+                        <span className="text-xs text-gray-400 ml-2">{m.notes}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {([
+                { key: "stability", label: "Stability", lo: "Expressive / varied", hi: "Steady / monotone" },
+                { key: "similarity_boost", label: "Clarity", lo: "Softer", hi: "Crisper, closer to original" },
+                { key: "style", label: "Style exaggeration", lo: "Neutral", hi: "Dramatic" },
+              ] as const).map((s) => (
+                <div key={s.key}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="font-medium text-gray-600">{s.label}</span>
+                    <span className="text-gray-400">{Math.round(voiceSettings[s.key] * 100)}%</span>
+                  </div>
+                  <input
+                    type="range" min={0} max={1} step={0.05}
+                    value={voiceSettings[s.key]}
+                    onChange={(e) => setVoiceSettings({ ...voiceSettings, [s.key]: Number(e.target.value) })}
+                    className="w-full accent-brand-500"
+                  />
+                  <div className="flex justify-between text-[11px] text-gray-400"><span>{s.lo}</span><span>{s.hi}</span></div>
+                </div>
+              ))}
+
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="font-medium text-gray-600">Pace</span>
+                  <span className="text-gray-400">{voiceSettings.speed.toFixed(2)}×</span>
+                </div>
+                <input
+                  type="range" min={0.7} max={1.2} step={0.05}
+                  value={voiceSettings.speed}
+                  onChange={(e) => setVoiceSettings({ ...voiceSettings, speed: Number(e.target.value) })}
+                  className="w-full accent-brand-500"
+                />
+                <div className="flex justify-between text-[11px] text-gray-400"><span>Slower</span><span>Faster</span></div>
+              </div>
+
+              <button type="button" onClick={() => setVoiceSettings(DEFAULT_SETTINGS)} className="text-xs text-gray-400 hover:text-gray-600 underline">
+                Reset to defaults
+              </button>
+            </div>
+          )}
         </Section>
 
         {/* Settings */}

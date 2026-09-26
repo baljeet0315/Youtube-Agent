@@ -99,6 +99,8 @@ class CreateJobRequest(BaseModel):
     source_text: Optional[str] = None       # used verbatim when input_mode == "text"
     auto_render: bool = False               # skip the script review gate (scheduled runs)
     visual_mode: Optional[str] = None       # "ai_images" | "stock" (default from user/env)
+    tts_model: Optional[str] = None         # ElevenLabs model id (default from env)
+    voice_settings: Optional[dict] = None   # {stability, similarity_boost, style, speed}
 
 
 def _script_helpers():
@@ -120,6 +122,34 @@ async def script_presets():
         "max_words": max_words,
         "words_per_second": 2.5,
         "max_seconds": 60,
+    }
+
+
+_voices_cache = {"at": 0.0, "data": None}
+
+
+@app.get("/voices")
+async def voices(user: dict = Depends(get_current_user)):
+    """ElevenLabs voices available to this account (premade + anything added to My Voices),
+    plus the TTS model options. Cached 10 minutes."""
+    import time, sys
+    for p in ("/agent", os.path.join(os.path.dirname(__file__), "..")):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    from voiceover import list_voices, TTS_MODELS, DEFAULT_VOICE_SETTINGS
+
+    if not _voices_cache["data"] or time.time() - _voices_cache["at"] > 600:
+        try:
+            _voices_cache["data"] = list_voices()
+            _voices_cache["at"] = time.time()
+        except Exception as e:
+            if not _voices_cache["data"]:
+                raise HTTPException(status_code=502, detail=f"Could not load voices: {e}")
+    return {
+        "voices": _voices_cache["data"],
+        "models": [{"id": k, "label": v[0], "notes": v[1]} for k, v in TTS_MODELS.items()],
+        "default_model": os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2"),
+        "default_settings": DEFAULT_VOICE_SETTINGS,
     }
 
 
@@ -162,7 +192,9 @@ async def create_job_endpoint(
         "topic": topic,
         "style": body.style,
         "narration_style": body.narration_style or "",
-        "voice_id": body.voice_id or user.get("default_voice_id"),
+        "voice_id": (body.voice_id or user.get("default_voice_id") or "").strip() or None,
+        "tts_model": body.tts_model or None,
+        "voice_settings": body.voice_settings or None,
         "duration": duration,
         "platform": body.platform,
         "privacy": body.privacy,

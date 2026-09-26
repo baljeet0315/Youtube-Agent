@@ -16,30 +16,86 @@ MAX_CHUNK_SECONDS = 1.6
 STROKE_W = 4
 
 
-# Script-specific fonts (Debian fonts-noto-core paths). DejaVu covers Latin/Cyrillic/Greek.
-SCRIPT_FONTS = [
-    # (unicode range, font path)
-    ((0x0A00, 0x0A7F), "/usr/share/fonts/truetype/noto/NotoSansGurmukhi-Bold.ttf"),   # Punjabi
-    ((0x0900, 0x097F), "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf"), # Hindi/Marathi
-    ((0x0600, 0x06FF), "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf"),     # Urdu/Arabic
-    ((0x0980, 0x09FF), "/usr/share/fonts/truetype/noto/NotoSansBengali-Bold.ttf"),
-    ((0x0B80, 0x0BFF), "/usr/share/fonts/truetype/noto/NotoSansTamil-Bold.ttf"),
-    ((0x0C00, 0x0C7F), "/usr/share/fonts/truetype/noto/NotoSansTelugu-Bold.ttf"),
-    ((0x0A80, 0x0AFF), "/usr/share/fonts/truetype/noto/NotoSansGujarati-Bold.ttf"),
+# Script detection → (fontconfig language tag, Noto family name). DejaVu covers Latin/Cyrillic/Greek.
+SCRIPTS = [
+    ((0x0A00, 0x0A7F), "pa", "NotoSansGurmukhi"),    # Punjabi
+    ((0x0900, 0x097F), "hi", "NotoSansDevanagari"),  # Hindi / Marathi
+    ((0x0600, 0x06FF), "ur", "NotoSansArabic"),      # Urdu / Arabic
+    ((0x0980, 0x09FF), "bn", "NotoSansBengali"),
+    ((0x0B80, 0x0BFF), "ta", "NotoSansTamil"),
+    ((0x0C00, 0x0C7F), "te", "NotoSansTelugu"),
+    ((0x0A80, 0x0AFF), "gu", "NotoSansGujarati"),
+]
+NOTO_URLS = [
+    "https://github.com/notofonts/notofonts.github.io/raw/main/fonts/{fam}/full/ttf/{fam}-Bold.ttf",
+    "https://github.com/notofonts/notofonts.github.io/raw/main/fonts/{fam}/hinted/ttf/{fam}-Bold.ttf",
+    # Google Fonts mirror (variable font; default instance renders fine)
+    "https://github.com/google/fonts/raw/main/ofl/{fam_lower}/{fam}%5Bwdth%2Cwght%5D.ttf",
+    "https://github.com/google/fonts/raw/main/ofl/{fam_lower}/{fam}%5Bwght%5D.ttf",
 ]
 _font_for_text_cache = {}
+_font_path_cache = {}
+
+
+def _fc_match(lang: str) -> str | None:
+    """Ask fontconfig for any installed font covering `lang`, preferring bold."""
+    import subprocess
+    try:
+        out = subprocess.run(["fc-list", f":lang={lang}", "file", "style"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return None
+    files = []
+    for line in out.splitlines():
+        path = line.split(":")[0].strip()
+        if path.lower().endswith((".ttf", ".otf")):
+            files.append((("bold" in line.lower()) * -1, path))   # bold first
+    files.sort()
+    return files[0][1] if files else None
+
+
+def _download_noto(fam: str) -> str | None:
+    """Fetch Noto Sans <script> Bold once and cache it under OUTPUT_DIR/fonts."""
+    import requests
+    d = os.path.join(config.OUTPUT_DIR, "fonts")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"{fam}-Bold.ttf")
+    if os.path.exists(path):
+        return path
+    for url in NOTO_URLS:
+        url = url.format(fam=fam, fam_lower=fam.lower())
+        try:
+            r = requests.get(url, timeout=30)
+            if r.status_code != 200 or len(r.content) < 20_000:
+                continue
+            with open(path, "wb") as f:
+                f.write(r.content)
+            print(f"   ⬇️  Downloaded caption font {fam} from {url.split('/')[2]}")
+            return path
+        except Exception as e:
+            print(f"   ⚠️  font download failed ({url.split('/')[2]}): {e}")
+    return None
 
 
 def _font_path_for(text: str) -> str:
     """Pick a font that has glyphs for the dominant non-Latin script in `text`."""
-    for (lo, hi), path in SCRIPT_FONTS:
-        if any(lo <= ord(ch) <= hi for ch in text):
-            if os.path.exists(path):
-                return path
-            # Bold missing? try Regular of the same family
-            alt = path.replace("-Bold", "-Regular")
-            if os.path.exists(alt):
-                return alt
+    for (lo, hi), lang, fam in SCRIPTS:
+        if not any(lo <= ord(ch) <= hi for ch in text):
+            continue
+        if lang in _font_path_cache:
+            return _font_path_cache[lang]
+        candidates = [
+            f"/usr/share/fonts/truetype/noto/{fam}-Bold.ttf",
+            f"/usr/share/fonts/truetype/noto/{fam}-Regular.ttf",
+            f"/usr/share/fonts/opentype/noto/{fam}-Bold.ttf",
+        ]
+        path = next((p for p in candidates if os.path.exists(p)), None) or _fc_match(lang) or _download_noto(fam)
+        if path:
+            print(f"   🔤 Caption font for '{lang}': {os.path.basename(path)}")
+            _font_path_cache[lang] = path
+            return path
+        print(f"   ⚠️  No font found for '{lang}' — captions may show boxes")
+        break
     return config.CAPTION_FONT
 
 

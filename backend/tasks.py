@@ -148,7 +148,9 @@ def render_video_task(self, job_id: str, user_id: str):
             set_progress(job_id, user_id, 40, "Generating voiceover...", status="rendering")
             audio_filename = f"{job_id}.mp3"
             src_audio, words = generate_voiceover_with_timestamps(
-                script["narration"], output_filename=audio_filename, voice_id=voice_id)
+                script["narration"], output_filename=audio_filename, voice_id=voice_id,
+                voice_settings=job.get("voice_settings") or None,
+                model_id=job.get("tts_model") or None)
             import shutil
             audio_path = os.path.join(tmpdir, "voice.mp3")
             shutil.copy(src_audio, audio_path)
