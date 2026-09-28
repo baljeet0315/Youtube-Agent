@@ -50,7 +50,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
         if not public_key:
             raise HTTPException(status_code=401, detail="Invalid token key")
 
-        payload = jwt.decode(token, public_key, algorithms=["RS256"])
+        # leeway: tolerate clock drift / a token that expired seconds ago while the request was in flight
+        payload = jwt.decode(token, public_key, algorithms=["RS256"],
+                             options={"leeway": 60, "verify_aud": False})
 
         clerk_id = payload.get("sub")
         email = payload.get("email") or None
