@@ -1,4 +1,8 @@
-# YouTube Shorts Agent — Setup Guide
+# YouTube Shorts Agent — Setup Guide (legacy CLI)
+
+> **Note (Sep 2026):** this describes the original command-line pipeline with stock footage.
+> The project is now a hosted web app — start with [`README.md`](README.md) instead.
+> This file is kept for running the agent modules locally without the web stack.
 
 ## Overview
 
