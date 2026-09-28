@@ -281,7 +281,7 @@ async def regenerate_job_script(job_id: str, body: RegenerateRequest, user: dict
     """Rewrite the script from free-text feedback; job returns to script_ready."""
     from database import update_job
     job = _owned_job(job_id, user)
-    if job["status"] not in ("script_ready", "failed"):
+    if job["status"] not in ("script_ready", "failed", "rejected"):
         raise HTTPException(status_code=400, detail=f"Can't regenerate in status '{job['status']}'")
     if not job.get("script"):
         raise HTTPException(status_code=400, detail="No script to regenerate yet")
@@ -301,7 +301,7 @@ async def render_job(job_id: str, user: dict = Depends(get_current_user)):
     """User approved the script — render voice + video."""
     from database import update_job
     job = _owned_job(job_id, user)
-    if job["status"] not in ("script_ready", "failed", "preview_ready"):
+    if job["status"] not in ("script_ready", "failed", "preview_ready", "rejected"):
         raise HTTPException(status_code=400, detail=f"Can't render in status '{job['status']}'")
     if not job.get("script"):
         raise HTTPException(status_code=400, detail="No script to render yet")
@@ -375,6 +375,43 @@ async def approve_job(
                message=f"Upload approved for: {', '.join(body.platforms)}")
 
     return {"success": True, "message": "Upload started"}
+
+
+class RejectRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+@app.post("/jobs/{job_id}/reject")
+async def reject_job(job_id: str, body: RejectRequest, user: dict = Depends(get_current_user)):
+    """
+    User rejects the rendered preview. Deletes the video/audio from R2, clears the
+    video URLs, marks the job `rejected`. The script, logs and the reason are kept —
+    the user can rewrite the script or re-render from here.
+    """
+    from database import update_job, update_video
+    from storage import delete_job_files
+    job = _owned_job(job_id, user)
+    if job["status"] != "preview_ready":
+        raise HTTPException(status_code=400, detail=f"Nothing to reject in status '{job['status']}'")
+
+    delete_job_files(user["id"], job_id)
+
+    for v in job.get("videos") or []:
+        update_video(v["id"], {"video_url": None, "audio_url": None})
+
+    reason = (body.reason or "").strip()
+    history = list(job.get("feedback_history") or [])
+    history.append({"rejected": True, "feedback": reason or "(no reason given)",
+                    "title_before": (job.get("script") or {}).get("title")})
+
+    update_job(job_id, {
+        "status": "rejected",
+        "current_step": "Preview rejected",
+        "feedback_history": history,
+        "progress": 30,
+    })
+    log_action(user["id"], "preview_rejected", job_id=job_id, message=reason or "no reason")
+    return {"success": True, "status": "rejected"}
 
 
 @app.post("/jobs/{job_id}/cancel")

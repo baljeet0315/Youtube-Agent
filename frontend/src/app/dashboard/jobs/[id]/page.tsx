@@ -5,6 +5,7 @@ import { useAuth } from "@clerk/nextjs";
 import {
   CheckCircle, XCircle, Youtube, ExternalLink, ThumbsUp, RotateCcw,
   Sparkles, Clapperboard, Music, Pencil, Save, MessageSquare, Film, ChevronDown, ChevronUp,
+  ThumbsDown, Trash2,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -32,8 +33,10 @@ export default function JobPage() {
 
   const [job, setJob] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<"" | "approve" | "render" | "save" | "regen">("");
+  const [busy, setBusy] = useState<"" | "approve" | "render" | "save" | "regen" | "reject">("");
   const [error, setError] = useState("");
+  const [rejecting, setRejecting] = useState(false);     // shows the reason box
+  const [rejectReason, setRejectReason] = useState("");
 
   // Script review draft (local edits before saving)
   const [draft, setDraft] = useState<any>(null);
@@ -68,7 +71,10 @@ export default function JobPage() {
         setDirty(false);
       }
     } catch (e: any) {
-      setError(e.message);
+      // Background polling: don't surface transient auth/network blips — the next poll
+      // (4 s later) gets a fresh Clerk token. Only show errors on the first load.
+      const transient = /expired|401|Failed to fetch|NetworkError/i.test(e.message || "");
+      if (!job || !transient) setError(e.message);
     } finally {
       setLoading(false);
     }
@@ -78,7 +84,7 @@ export default function JobPage() {
     fetchJob();
     const interval = setInterval(() => {
       const s = job?.status;
-      if (s && ["done", "failed", "preview_ready", "cancelled", "script_ready"].includes(s)) {
+      if (s && ["done", "failed", "preview_ready", "cancelled", "script_ready", "rejected"].includes(s)) {
         clearInterval(interval);
         return;
       }
@@ -121,6 +127,14 @@ export default function JobPage() {
     await api(`/jobs/${id}/approve`, { method: "POST", body: JSON.stringify({ platforms: job.platform }) });
   });
 
+  const handleReject = () => run("reject", async () => {
+    await api(`/jobs/${id}/reject`, { method: "POST", body: JSON.stringify({ reason: rejectReason.trim() }) });
+    setRejecting(false);
+    // carry the reason into the rewrite box so one more tap turns it into a new script
+    if (rejectReason.trim()) setFeedback(rejectReason.trim());
+    setRejectReason("");
+  });
+
   const setField = (k: string, v: any) => { setDraft({ ...draft, [k]: v }); setDirty(true); };
   const setScene = (sid: number, k: string, v: any) => {
     setDraft({ ...draft, scenes: draft.scenes.map((s: any) => (s.id === sid ? { ...s, [k]: v } : s)) });
@@ -136,6 +150,7 @@ export default function JobPage() {
   const isDone = status === "done";
   const isScriptReady = status === "script_ready" && draft;
   const isPreviewReady = status === "preview_ready";
+  const isRejected = status === "rejected";
   const isWorking = ["pending", "scripting", "rendering", "uploading"].includes(status);
   const currentStepIndex = STATUS_STEPS.findIndex((s) => s.key === status);
   const textMode = job.script?.input_mode === "text";
@@ -154,7 +169,7 @@ export default function JobPage() {
       </div>
 
       {/* Progress steps */}
-      {!isFailed && (
+      {!isFailed && !isRejected && (
         <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-5">
           <div className="flex items-center justify-between mb-4 overflow-x-auto">
             {STATUS_STEPS.map((step, i) => (
@@ -418,25 +433,114 @@ export default function JobPage() {
         </div>
       )}
 
-      {/* Approve / re-render */}
-      {isPreviewReady && (
-        <div className="flex flex-col sm:flex-row gap-3">
-          <button
-            onClick={handleRender}
-            disabled={!!busy}
-            className="flex items-center justify-center gap-2 border border-gray-200 hover:bg-gray-50 text-gray-800 py-3.5 px-5 rounded-xl font-medium text-sm transition disabled:opacity-50"
-            title="Render again with the same script"
-          >
-            <RotateCcw size={15} /> Re-render
-          </button>
+      {/* Approve / reject */}
+      {isPreviewReady && !rejecting && (
+        <div className="space-y-3">
           <button
             onClick={handleApprove}
             disabled={!!busy}
-            className="flex-1 flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white py-3.5 rounded-xl font-medium text-sm transition disabled:opacity-60"
+            className="w-full flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 active:scale-[0.99] text-white py-4 rounded-2xl font-medium text-base transition disabled:opacity-60 shadow-lg shadow-gray-900/10"
           >
-            {busy === "approve" ? <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" /> : <ThumbsUp size={16} />}
+            {busy === "approve" ? <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" /> : <ThumbsUp size={18} />}
             {busy === "approve" ? "Uploading…" : "Looks good — post to YouTube"}
           </button>
+          <div className="flex gap-3">
+            <button
+              onClick={handleRender}
+              disabled={!!busy}
+              className="flex-1 flex items-center justify-center gap-2 border border-gray-200 hover:bg-gray-50 text-gray-700 py-3 rounded-xl text-sm transition disabled:opacity-50"
+              title="Same script, fresh render"
+            >
+              <RotateCcw size={14} /> Try again
+            </button>
+            <button
+              onClick={() => setRejecting(true)}
+              disabled={!!busy}
+              className="flex-1 flex items-center justify-center gap-2 border border-red-100 hover:bg-red-50 text-red-600 py-3 rounded-xl text-sm transition disabled:opacity-50"
+            >
+              <ThumbsDown size={14} /> Not good — discard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Reject confirm */}
+      {isPreviewReady && rejecting && (
+        <div className="bg-white rounded-2xl border border-red-100 shadow-sm p-5 sm:p-6 space-y-3">
+          <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+            <ThumbsDown size={14} className="text-red-500" /> Discard this video?
+          </p>
+          <p className="text-xs text-gray-500">The video file is deleted. Your script stays, so you can fix it and try again.</p>
+          <textarea
+            rows={2}
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder='Optional — what was wrong? e.g. "images too dark", "voice too fast", "script boring"'
+            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-base sm:text-sm resize-y outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+          />
+          <div className="flex gap-3">
+            <button onClick={() => { setRejecting(false); setRejectReason(""); }} disabled={!!busy}
+                    className="flex-1 border border-gray-200 hover:bg-gray-50 text-gray-700 py-3 rounded-xl text-sm transition">
+              Keep it
+            </button>
+            <button onClick={handleReject} disabled={!!busy}
+                    className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl text-sm font-medium transition disabled:opacity-60">
+              {busy === "reject" ? <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" /> : <Trash2 size={14} />}
+              Discard video
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Rejected → ways forward */}
+      {isRejected && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6">
+            <p className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-1">
+              <ThumbsDown size={14} className="text-gray-400" /> Video discarded
+            </p>
+            <p className="text-xs text-gray-500">Your script is still here. Tell it what to change and rewrite, or render the same script again.</p>
+            {job.feedback_history?.length > 0 && (
+              <div className="mt-3 space-y-1">
+                {job.feedback_history.map((h: any, i: number) => (
+                  <p key={i} className="text-xs text-gray-400">{h.rejected ? "✕" : "↳"} {h.feedback}</p>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6">
+            <p className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-2">
+              <MessageSquare size={14} className="text-gray-400" /> What should change?
+            </p>
+            <textarea
+              rows={2}
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              placeholder='"shorter and punchier", "warmer visuals", "different angle on the topic"'
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-base sm:text-sm resize-y outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+            />
+            <div className="flex flex-col sm:flex-row gap-3 mt-3">
+              <button
+                onClick={handleRegenerate}
+                disabled={!!busy || feedback.trim().length < 3}
+                className="flex-1 flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white py-3.5 rounded-xl text-sm font-medium transition disabled:opacity-40"
+              >
+                {busy === "regen" ? <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" /> : <Sparkles size={15} />}
+                Rewrite the script
+              </button>
+              <button
+                onClick={handleRender}
+                disabled={!!busy}
+                className="flex-1 flex items-center justify-center gap-2 border border-gray-200 hover:bg-gray-50 text-gray-800 py-3.5 rounded-xl text-sm font-medium transition disabled:opacity-50"
+              >
+                <RotateCcw size={15} /> Same script, render again
+              </button>
+            </div>
+            <button onClick={() => router.push("/dashboard")} className="mt-3 text-xs text-gray-400 hover:text-gray-600 underline">
+              Start a new video instead
+            </button>
+          </div>
         </div>
       )}
 

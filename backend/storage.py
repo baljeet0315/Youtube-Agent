@@ -9,10 +9,6 @@ settings = get_settings()
 
 
 def get_r2_client():
-    print(f"[R2 DEBUG] endpoint={settings.r2_endpoint!r}")
-    print(f"[R2 DEBUG] bucket={settings.r2_bucket_name!r}")
-    print(f"[R2 DEBUG] access_key_id={settings.r2_access_key_id[:8]!r}...")
-    print(f"[R2 DEBUG] secret_set={bool(settings.r2_secret_access_key)}")
     return boto3.client(
         "s3",
         endpoint_url=settings.r2_endpoint,
@@ -70,3 +66,20 @@ def delete_file(key: str):
     """Delete a file from R2."""
     client = get_r2_client()
     client.delete_object(Bucket=settings.r2_bucket_name, Key=key)
+
+
+def job_keys(user_id: str, job_id: str) -> list:
+    """All R2 objects a render writes for a job (keep in sync with tasks.render_video_task)."""
+    return [f"videos/{user_id}/{job_id}.mp4", f"audio/{user_id}/{job_id}.mp3"]
+
+
+def delete_job_files(user_id: str, job_id: str) -> int:
+    """Best-effort delete of a job's rendered assets. Returns number of keys attempted."""
+    client = get_r2_client()
+    keys = job_keys(user_id, job_id)
+    try:
+        client.delete_objects(Bucket=settings.r2_bucket_name,
+                              Delete={"Objects": [{"Key": k} for k in keys], "Quiet": True})
+    except Exception as e:
+        print(f"⚠️  R2 delete failed for job {job_id}: {e}")
+    return len(keys)
